@@ -1,0 +1,151 @@
+const User = require("../models/User");
+
+exports.addToWatchlist = async (req, res, next) => {
+  try {
+    const { anilistId, title, coverImage } = req.body;
+    if (!anilistId || !title) {
+      return res.status(400).json({ success: false, message: "anilistId and title are required" });
+    }
+
+    const user = req.user;
+    const numericId = Number(anilistId);
+
+    if (user.watchlist.some((w) => w.anilistId === numericId)) {
+      return res.status(400).json({ success: false, message: "Already in watchlist" });
+    }
+
+    user.watchlist.push({ anilistId: numericId, title, coverImage: coverImage || "" });
+    await user.save();
+
+    res.json({ success: true, message: "Added to watchlist", watchlist: user.watchlist });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.removeFromWatchlist = async (req, res, next) => {
+  try {
+    const { anilistId } = req.params;
+    const numericId = Number(anilistId);
+    if (!numericId || isNaN(numericId)) {
+      return res.status(400).json({ success: false, message: "Invalid anilistId" });
+    }
+
+    const user = req.user;
+    const prevLength = user.watchlist.length;
+    user.watchlist = user.watchlist.filter((w) => w.anilistId !== numericId);
+
+    if (user.watchlist.length === prevLength) {
+      return res.status(404).json({ success: false, message: "Not in watchlist" });
+    }
+
+    await user.save();
+    res.json({ success: true, message: "Removed from watchlist", watchlist: user.watchlist });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.getWatchlist = async (req, res, next) => {
+  try {
+    const { page, limit } = req.query;
+    const user = req.user;
+    const perPage = Math.min(parseInt(limit) || 50, 100);
+    const pageNum = parseInt(page) || 1;
+    const start = (pageNum - 1) * perPage;
+    const paged = user.watchlist.slice(start, start + perPage);
+
+    res.json({
+      success: true,
+      data: paged,
+      pagination: { page: pageNum, limit: perPage, total: user.watchlist.length },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.updateWatchProgress = async (req, res, next) => {
+  try {
+    const { anilistId, title, coverImage, episode, progress } = req.body;
+    if (!anilistId || !title || !episode) {
+      return res.status(400).json({ success: false, message: "anilistId, title, and episode are required" });
+    }
+
+    const user = req.user;
+    const numericAnilistId = Number(anilistId);
+    const numericEpisode = Number(episode);
+
+    if (isNaN(numericAnilistId) || isNaN(numericEpisode)) {
+      return res.status(400).json({ success: false, message: "anilistId and episode must be numbers" });
+    }
+
+    const existing = user.watchHistory.find(
+      (h) => h.anilistId === numericAnilistId && h.episode === numericEpisode
+    );
+    if (existing) {
+      existing.progress = progress || 0;
+      existing.lastWatched = new Date();
+    } else {
+      user.watchHistory.push({
+        anilistId: numericAnilistId,
+        title,
+        coverImage: coverImage || "",
+        episode: numericEpisode,
+        progress: progress || 0,
+        lastWatched: new Date(),
+      });
+    }
+
+    if (user.watchHistory.length > 100) {
+      user.watchHistory = user.watchHistory.slice(-100);
+    }
+
+    await user.save();
+    res.json({ success: true, message: "Watch progress updated" });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.getWatchHistory = async (req, res, next) => {
+  try {
+    const { page, limit } = req.query;
+    const user = req.user;
+    const sorted = [...user.watchHistory].sort((a, b) => new Date(b.lastWatched) - new Date(a.lastWatched));
+    const perPage = Math.min(parseInt(limit) || 50, 100);
+    const pageNum = parseInt(page) || 1;
+    const start = (pageNum - 1) * perPage;
+    const paged = sorted.slice(start, start + perPage);
+
+    res.json({
+      success: true,
+      data: paged,
+      pagination: { page: pageNum, limit: perPage, total: sorted.length },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.getContinueWatching = async (req, res, next) => {
+  try {
+    const user = req.user;
+
+    const latestByAnime = {};
+    for (const entry of user.watchHistory) {
+      const key = entry.anilistId;
+      if (!latestByAnime[key] || new Date(entry.lastWatched) > new Date(latestByAnime[key].lastWatched)) {
+        latestByAnime[key] = entry;
+      }
+    }
+
+    const continueWatching = Object.values(latestByAnime)
+      .sort((a, b) => new Date(b.lastWatched) - new Date(a.lastWatched))
+      .slice(0, 20);
+
+    res.json({ success: true, data: continueWatching });
+  } catch (err) {
+    next(err);
+  }
+};

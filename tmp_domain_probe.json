@@ -1,0 +1,93 @@
+[
+  {
+    "domain": "watchanimeworld.com",
+    "status": 200,
+    "finalUrl": "https://watchanimeworld.com/",
+    "contentType": "text/html; charset=UTF-8",
+    "bodyPreview": "<!DOCTYPE html> <html lang=\"en\"> <head> <meta charset=\"utf-8\"> <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"> <title>watchanimeworld.com</title> <meta name=\"description\" content=\"Find information, resources and relevant links for watchanimeworld.com. This domain may be for sale"
+  },
+  {
+    "domain": "watchanimeworld.net",
+    "error": "timeout of 15000ms exceeded"
+  },
+  {
+    "domain": "watchanimeworld.tv",
+    "error": "getaddrinfo ENOTFOUND watchanimeworld.tv"
+  },
+  {
+    "domain": "watchanimeworld.xyz",
+    "error": "getaddrinfo ENOTFOUND watchanimeworld.xyz"
+  },
+  {
+    "domain": "watchanimeworld.online",
+    "error": "getaddrinfo ENOTFOUND watchanimeworld.online"
+  },
+  {
+    "domain": "watchanimeworld.info",
+    "error": "getaddrinfo ENOTFOUND watchanimeworld.info"
+  },
+  {
+    "domain": "watchanimeworld.site",
+    "error": "getaddrinfo ENOTFOUND watchanimeworld.site"
+  },
+  {
+    "domain": "watchanimeworld.link",
+    "error": "getaddrinfo ENOTFOUND watchanimeworld.link"
+  },
+  {
+    "domain": "watchanimeworld.cc",
+    "status": 200,
+    "finalUrl": "https://watchanimeworld.top/",
+    "contentType": "text/html; charset=UTF-8",
+    "bodyPreview": "<!doctype html> <html lang=\"en-US\" prefix=\"og: https://ogp.me/ns#\"> <head>     <meta charset=\"UTF-8\">     <meta name=\"viewport\" content=\"width=device-width,minimum-scale=1,initial-scale=1\">     <meta http-equiv=\"X-UA-Compatible\" content=\"IE=edge\"> <!-- Google tag (gtag.js) --> <script async src=\"htt"
+  },
+  {
+    "domain": "watchanimeworld.me",
+    "error": "getaddrinfo ENOTFOUND watchanimeworld.me"
+  },
+  {
+    "domain": "watchanimeworld.org",
+    "status": 200,
+    "finalUrl": "https://watchanimeworld.org/",
+    "contentType": "text/html; charset=UTF-8",
+    "bodyPreview": "<!doctype html> <html lang=\"en-US\" prefix=\"og: https://ogp.me/ns#\"> <head>     <meta charset=\"UTF-8\">     <meta name=\"viewport\" content=\"width=device-width,minimum-scale=1,initial-scale=1\">     <meta http-equiv=\"X-UA-Compatible\" content=\"IE=edge\">      <!-- Search Engine Optimization by Rank Math - "
+  },
+  {
+    "domain": "watchanimeworld.co",
+    "error": "getaddrinfo ENOTFOUND watchanimeworld.co"
+  },
+  {
+    "domain": "watchanimeworld.live",
+    "error": "getaddrinfo ENOTFOUND watchanimeworld.live"
+  },
+  {
+    "domain": "watchanimeworld.to",
+    "error": "getaddrinfo ENOTFOUND watchanimeworld.to"
+  },
+  {
+    "domain": "animeworld.me",
+    "status": 200,
+    "finalUrl": "https://animeworld.me/",
+    "contentType": "text/html; charset=UTF-8",
+    "bodyPreview": "<!DOCTYPE html> <html lang=\"en\"> <head>   <meta charset=\"utf-8\" />   <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />   <title>Anime World India – Official Website</title>   <meta name=\"description\" content=\"AnimeWorld, Anime World, Anime World India, WatchAnimeWorld, stream th"
+  },
+  {
+    "domain": "animeworldindia.net",
+    "status": 200,
+    "finalUrl": "https://animeworldindia.net/",
+    "contentType": "text/html; charset=utf-8",
+    "bodyPreview": "<!DOCTYPE html> <html lang=\"en\" dir=\"ltr\"> <head>     <script>         if (window.location.hostname.includes(\".pages.dev\")) {             const newUrl =                 \"https://animeworldindia.net\" + window.location.pathname + window.location.search;             window.location.replace(newUrl);    "
+  },
+  {
+    "domain": "anime-world.app",
+    "error": "timeout of 15000ms exceeded"
+  },
+  {
+    "domain": "animeworld.app",
+    "error": "write EPROTO F0580000:error:0A000410:SSL routines:ssl3_read_bytes:ssl/tls alert handshake failure:openssl\\ssl\\record\\rec_layer_s3.c:916:SSL alert number 40\n"
+  },
+  {
+    "domain": "animeworld.online",
+    "error": "getaddrinfo ENOTFOUND animeworld.online"
+  }
+]
