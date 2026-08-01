@@ -1,5 +1,6 @@
 import { getCatalog } from "@/lib/api";
 import AnimeCard from "@/components/AnimeCard";
+import ContinueWatching from "@/components/ContinueWatching";
 import Link from "next/link";
 
 const CATALOGS = [
@@ -10,7 +11,47 @@ const CATALOGS = [
   { key: "latest anime movies", label: "🎥 Latest Movies", slug: "latest-movies" },
 ];
 
-export default async function HomePage() {
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ catalog?: string }>;
+}) {
+  const params = await searchParams;
+  const catalogKey = params.catalog;
+
+  if (catalogKey) {
+    const catalog = CATALOGS.find((c) => c.slug === catalogKey);
+    const items = catalog ? await getCatalog(catalog.key) : [];
+
+    return (
+      <div className="max-w-7xl mx-auto px-4 py-6">
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-2xl font-bold">{catalog?.label || "Catalog"}</h1>
+          <Link
+            href="/"
+            className="text-sm text-purple-400 hover:text-purple-300 transition-colors"
+          >
+            ← Back to Home
+          </Link>
+        </div>
+
+        {items.length === 0 ? (
+          <div className="text-center py-20">
+            <p className="text-6xl mb-4">📭</p>
+            <p className="text-gray-400">No items found in this catalog yet.</p>
+            <p className="text-gray-600 text-sm mt-2">Try another catalog</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+            {items.map((item) => (
+              <AnimeCard key={item.slug} item={item} />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   const catalogsData = await Promise.all(
     CATALOGS.map((c) => getCatalog(c.key))
   );
@@ -47,6 +88,9 @@ export default async function HomePage() {
           </div>
         </div>
       </section>
+
+      {/* Continue Watching */}
+      <ContinueWatching />
 
       {/* Catalog Sections */}
       {CATALOGS.map((catalog, i) => {

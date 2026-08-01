@@ -44,6 +44,7 @@ const UserSchema = new mongoose.Schema(
         anilistId: { type: Number, required: true },
         title: { type: String, required: true },
         coverImage: { type: String, default: "" },
+        season: { type: Number, default: 1 },
         episode: { type: Number, required: true },
         progress: { type: Number, default: 0 },
         lastWatched: { type: Date, default: Date.now },

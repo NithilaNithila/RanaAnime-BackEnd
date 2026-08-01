@@ -1,5 +1,6 @@
 import { getAvailableStreamSources, getAnimeDetails } from "@/lib/api";
 import VideoPlayer from "@/components/VideoPlayer";
+import HistoryRecorder from "@/components/HistoryRecorder";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -50,6 +51,12 @@ export default async function WatchPage({
         season={season}
         episode={episode}
         title={`${details?.title || animeSlug} - ${epLabel}`}
+      />
+      <HistoryRecorder
+        title={details?.title || animeSlug}
+        coverImage={details?.poster ?? undefined}
+        season={season}
+        episode={episode}
       />
 
       {/* Info */}

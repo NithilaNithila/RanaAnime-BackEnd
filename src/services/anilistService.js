@@ -97,8 +97,21 @@ query ($id: Int) {
     characters(sort: ROLE, perPage: 10) {
       edges { role node { name { full } image { medium } } }
     }
-    relations { edges { relationType node { id title { romaji english } episodes format } } }
+    relations { edges { relationType node { id title { romaji english } episodes format coverImage { large medium } } } }
     nextAiringEpisode { episode timeUntilAiring }
+  }
+}`;
+
+const GENRE_QUERY = `
+query ($genre: String, $page: Int, $perPage: Int) {
+  Page(page: $page, perPage: $perPage) {
+    pageInfo { hasNextPage currentPage }
+    media(genre: $genre, type: ANIME, sort: POPULARITY_DESC) {
+      id idMal title { romaji english native }
+      coverImage { large medium }
+      bannerImage episodes status season seasonYear genres format averageScore popularity trending
+      nextAiringEpisode { episode timeUntilAiring }
+    }
   }
 }`;
 
@@ -108,7 +121,7 @@ const post = async (query, variables = {}) => {
 };
 
 const search = async (query, page = 1, perPage = 20) => {
-  const cacheKey = `anilist_search_${query}_${page}`;
+  const cacheKey = `anilist_search_${query}_${page}_${perPage}`;
   const cached = cache.get(cacheKey);
   if (cached) return cached;
 
@@ -163,7 +176,7 @@ const getSeasonal = async (season = null, year = null, page = 1, perPage = 20) =
   const currentSeason = season || seasonMap[now.getMonth()];
   const currentYear = year || now.getFullYear();
 
-  const cacheKey = `anilist_seasonal_${currentSeason}_${currentYear}_${page}`;
+  const cacheKey = `anilist_seasonal_${currentSeason}_${currentYear}_${page}_${perPage}`;
   const cached = cache.get(cacheKey);
   if (cached) return cached;
 
@@ -178,38 +191,52 @@ const getSeasonal = async (season = null, year = null, page = 1, perPage = 20) =
   }
 };
 
+const isSeasonFormat = (format) => {
+  return format === "TV" || format === "ONA";
+};
+
+const estimateEpisodeCount = (media) => {
+  if (media?.episodes) return media.episodes;
+  if (media?.nextAiringEpisode?.episode) return media.nextAiringEpisode.episode - 1;
+  return 0;
+};
+
 const buildSeasons = (media) => {
   const seasons = [];
-  let episodeOffset = 0;
+  const allEdges = media.relations?.edges || [];
 
-  seasons.push({
-    seasonNumber: 1,
-    title: media.title?.english || media.title?.romaji || "Season 1",
-    anilistId: media.id,
-    episodeCount: media.episodes || 0,
-    startEpisode: episodeOffset + 1,
-  });
-  episodeOffset += media.episodes || 0;
-
-  const sequelEdges = (media.relations?.edges || []).filter(
-    (e) => e.relationType === "SEQUEL"
+  const prequelEdges = allEdges.filter(
+    (e) => e.relationType === "PREQUEL" && isSeasonFormat(e.node.format)
+  );
+  const sequelEdges = allEdges.filter(
+    (e) => e.relationType === "SEQUEL" && isSeasonFormat(e.node.format)
   );
 
-  let seasonNum = 2;
-  for (const edge of sequelEdges) {
-    const node = edge.node;
-    if (!node || !node.episodes) continue;
-
+  prequelEdges.forEach((edge, i) => {
     seasons.push({
-      seasonNumber: seasonNum,
-      title: node.title?.english || node.title?.romaji || `Season ${seasonNum}`,
-      anilistId: node.id,
-      episodeCount: node.episodes,
-      startEpisode: episodeOffset + 1,
+      seasonNumber: i + 1,
+      title: edge.node.title?.english || edge.node.title?.romaji || `Season ${i + 1}`,
+      anilistId: edge.node.id,
+      episodeCount: estimateEpisodeCount(edge.node),
     });
-    episodeOffset += node.episodes;
-    seasonNum++;
-  }
+  });
+
+  const currentSeasonNumber = prequelEdges.length + 1;
+  seasons.push({
+    seasonNumber: currentSeasonNumber,
+    title: media.title?.english || media.title?.romaji || `Season ${currentSeasonNumber}`,
+    anilistId: media.id,
+    episodeCount: estimateEpisodeCount(media),
+  });
+
+  sequelEdges.forEach((edge, i) => {
+    seasons.push({
+      seasonNumber: currentSeasonNumber + 1 + i,
+      title: edge.node.title?.english || edge.node.title?.romaji || `Season ${currentSeasonNumber + 1 + i}`,
+      anilistId: edge.node.id,
+      episodeCount: estimateEpisodeCount(edge.node),
+    });
+  });
 
   return seasons;
 };
@@ -235,4 +262,22 @@ const getMediaInfo = async (id) => {
   }
 };
 
-module.exports = { search, getTrending, getPopular, getSeasonal, getMediaInfo };
+const getByGenre = async (genre, page = 1, perPage = 20) => {
+  const cacheKey = `anilist_genre_${genre}_${page}_${perPage}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const data = await post(GENRE_QUERY, { genre, page, perPage });
+    const results = data?.Page?.media?.map(transformMedia) || [];
+    const pageInfo = data?.Page?.pageInfo || {};
+    const result = { results, pageInfo };
+    cache.set(cacheKey, result, 900);
+    return result;
+  } catch (err) {
+    console.error("[anilist] getByGenre failed:", err.message);
+    return { results: [], pageInfo: {} };
+  }
+};
+
+module.exports = { search, getTrending, getPopular, getSeasonal, getMediaInfo, getByGenre };

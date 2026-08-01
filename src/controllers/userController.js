@@ -10,6 +10,10 @@ exports.addToWatchlist = async (req, res, next) => {
     const user = req.user;
     const numericId = Number(anilistId);
 
+    if (!Number.isInteger(numericId) || numericId <= 0) {
+      return res.status(400).json({ success: false, message: "anilistId must be a positive integer" });
+    }
+
     if (user.watchlist.some((w) => w.anilistId === numericId)) {
       return res.status(400).json({ success: false, message: "Already in watchlist" });
     }
@@ -67,21 +71,22 @@ exports.getWatchlist = async (req, res, next) => {
 
 exports.updateWatchProgress = async (req, res, next) => {
   try {
-    const { anilistId, title, coverImage, episode, progress } = req.body;
-    if (!anilistId || !title || !episode) {
+    const { anilistId, title, coverImage, season, episode, progress } = req.body;
+    if (!anilistId || !title || episode === undefined) {
       return res.status(400).json({ success: false, message: "anilistId, title, and episode are required" });
     }
 
     const user = req.user;
     const numericAnilistId = Number(anilistId);
+    const numericSeason = season !== undefined ? Number(season) : 1;
     const numericEpisode = Number(episode);
 
-    if (isNaN(numericAnilistId) || isNaN(numericEpisode)) {
-      return res.status(400).json({ success: false, message: "anilistId and episode must be numbers" });
+    if (isNaN(numericAnilistId) || isNaN(numericSeason) || isNaN(numericEpisode)) {
+      return res.status(400).json({ success: false, message: "anilistId, season, and episode must be numbers" });
     }
 
     const existing = user.watchHistory.find(
-      (h) => h.anilistId === numericAnilistId && h.episode === numericEpisode
+      (h) => h.anilistId === numericAnilistId && h.season === numericSeason && h.episode === numericEpisode
     );
     if (existing) {
       existing.progress = progress || 0;
@@ -91,6 +96,7 @@ exports.updateWatchProgress = async (req, res, next) => {
         anilistId: numericAnilistId,
         title,
         coverImage: coverImage || "",
+        season: numericSeason,
         episode: numericEpisode,
         progress: progress || 0,
         lastWatched: new Date(),
@@ -134,7 +140,7 @@ exports.getContinueWatching = async (req, res, next) => {
 
     const latestByAnime = {};
     for (const entry of user.watchHistory) {
-      const key = entry.anilistId;
+      const key = `${entry.anilistId}-${entry.season || 1}`;
       if (!latestByAnime[key] || new Date(entry.lastWatched) > new Date(latestByAnime[key].lastWatched)) {
         latestByAnime[key] = entry;
       }

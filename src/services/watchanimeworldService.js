@@ -70,6 +70,41 @@ const requestPage = async (path, options = {}) => {
   throw new Error(`Failed to fetch WatchAnimeWorld page (${errors.join(" | ")})`);
 };
 
+const extractAnimeItems = ($) => {
+  const results = [];
+
+  $("ul.post-lst li, .post-lst li, article.post, .item, .bsx").each((_, el) => {
+    const $el = $(el);
+    const linkEl = $el.find("a.lnk-blk").first().length ? $el.find("a.lnk-blk").first() : $el.find("a").first();
+    const href = linkEl.attr("href") || "";
+    const title =
+      $el.find("h2.entry-title, h3.entry-title, .entry-title, .tt, .title").first().text().trim() ||
+      linkEl.attr("title")?.trim() ||
+      linkEl.text().trim();
+    const imgEl = $el.find("img").first();
+    const image = imgEl.attr("src") || imgEl.attr("data-src") || "";
+
+    if (title && href) {
+      const slug = href.replace(BASE_URL, "").replace(/^\/|\/$/g, "");
+      results.push({
+        title,
+        image,
+        slug,
+        url: href,
+        type: slug.includes("series") ? "series" : "movies",
+      });
+    }
+  });
+
+  const seen = new Set();
+  return results.filter((r) => {
+    const key = r.slug || r.title;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
 const search = async (query) => {
   const cacheKey = `waw_search_${query}`;
   const cached = cache.get(cacheKey);
@@ -82,35 +117,29 @@ const search = async (query) => {
       return [];
     }
     const $ = cheerio.load(html);
-    const results = [];
-
-    $("ul.post-lst li, .post-lst li, article.post, .item, .bsx").each((_, el) => {
-      const $el = $(el);
-      const linkEl = $el.find("a.lnk-blk").first().length ? $el.find("a.lnk-blk").first() : $el.find("a").first();
-      const href = linkEl.attr("href") || "";
-      const title =
-        $el.find("h2.entry-title, h3.entry-title, .entry-title, .tt, .title").first().text().trim() ||
-        linkEl.attr("title")?.trim() ||
-        linkEl.text().trim();
-      const imgEl = $el.find("img").first();
-      const image = imgEl.attr("src") || imgEl.attr("data-src") || "";
-
-      if (title && href) {
-        const slug = href.replace(BASE_URL, "").replace(/^\/|\/$/g, "");
-        results.push({
-          title,
-          image,
-          slug,
-          url: href,
-          type: slug.includes("series") ? "series" : "movies",
-        });
-      }
-    });
+    const results = extractAnimeItems($);
 
     cache.set(cacheKey, results, 300);
     return results;
   } catch (err) {
     console.error("[WatchAnimeWorld] Search failed:", err.message);
+    return [];
+  }
+};
+
+const getHomepage = async (limit = 24) => {
+  const cacheKey = `waw_home_${limit}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const { html } = await requestPage("/");
+    const $ = cheerio.load(html);
+    const results = extractAnimeItems($).slice(0, limit);
+    cache.set(cacheKey, results, 600);
+    return results;
+  } catch (err) {
+    console.error("[WatchAnimeWorld] Homepage scrape failed:", err.message);
     return [];
   }
 };
@@ -135,10 +164,17 @@ const getDetails = async (slug) => {
     if (postIdMatch) postId = postIdMatch[1];
 
     const seasons = [];
-    const seasonLinks = $(".choose-season .sel-temp a[data-post][data-season]");
+    const seasonLinks = $(
+      ".choose-season .sel-temp a[data-post][data-season], " +
+      ".s-seasons a[data-season], " +
+      ".season-list a[data-season], " +
+      ".seasons a.season, " +
+      "a[data-season], " +
+      "[data-season] a"
+    );
     seasonLinks.each((_, el) => {
       const $el = $(el);
-      const val = $el.attr("data-season") || "";
+      const val = $el.attr("data-season") || $el.data("season") || "";
       const text = $el.text().trim();
       if (val && text) {
         seasons.push({ id: val, title: text, seasonNumber: seasons.length + 1 });
@@ -146,12 +182,21 @@ const getDetails = async (slug) => {
     });
 
     if (seasons.length === 0) {
-      const seasonOptions = $("select[name*='season'] option, .season-select option, select option");
+      const seasonOptions = $(
+        "select[name*='season'] option, " +
+        ".season-select option, " +
+        "select option, " +
+        ".custom-select option, " +
+        ".season-dropdown option"
+      );
       seasonOptions.each((_, el) => {
         const val = $(el).attr("value") || "";
         const text = $(el).text().trim();
         if (val && text && !/select/i.test(text)) {
-          seasons.push({ id: val, title: text, seasonNumber: seasons.length + 1 });
+          const existing = seasons.find((s) => s.id === val);
+          if (!existing) {
+            seasons.push({ id: val, title: text, seasonNumber: seasons.length + 1 });
+          }
         }
       });
     }
@@ -161,8 +206,19 @@ const getDetails = async (slug) => {
     }
 
     const episodes = [];
-    const episodeItems = $("#episode_by_temp > li");
-    const targetItems = episodeItems.length ? episodeItems : $(".post-lst > li, .section.episodes li, .eplister ul li, .episode-list li");
+    const episodeItems = $("#episode_by_temp > li, #aa-episodes li, .episodes li");
+    const targetItems = episodeItems.length
+      ? episodeItems
+      : $(
+          ".post-lst > li, " +
+          ".section.episodes li, " +
+          ".eplister ul li, " +
+          ".episode-list li, " +
+          ".list-episode li, " +
+          ".listing li, " +
+          "ul.episodes li, " +
+          ".episode-list-item"
+        );
 
     let perSeasonIndex = 1;
     targetItems.each((_, el) => {
@@ -171,21 +227,31 @@ const getDetails = async (slug) => {
       const epHref = epLink.attr("href") || "";
       if (!epHref || epHref.includes("javascript:")) return;
 
-      const numEpi = $el.find(".num-epi").first().text().trim();
-      const entryTitle = $el.find(".entry-title").first().text().trim();
+      const numEpi = $el.find(".num-epi, .ep-number, .e-num, .eptag").first().text().trim();
+      const entryTitle = $el.find(".entry-title, .ep-title, .tt").first().text().trim();
       const epTitle = numEpi || entryTitle;
 
-      let episodeNumber = perSeasonIndex++;
+      let episodeNumber = perSeasonIndex;
       let seasonNumber = 1;
+      const sxxExxMatch = epTitle.match(/[sS](\d+)\s*[eE](\d+)/);
       const multiMatch = numEpi.match(/(\d+)[xX](\d+)/) || entryTitle.match(/(\d+)[xX](\d+)/) || epTitle.match(/(\d+)[xX](\d+)/);
-      if (multiMatch) {
+      if (sxxExxMatch) {
+        seasonNumber = parseInt(sxxExxMatch[1], 10);
+        episodeNumber = parseInt(sxxExxMatch[2], 10);
+      } else if (multiMatch) {
         seasonNumber = parseInt(multiMatch[1], 10);
+        episodeNumber = parseInt(multiMatch[2], 10);
       } else {
-        const epNumMatch = epTitle.match(/episode\s*(\d+)/i);
+        const epNumMatch = epTitle.match(/episode\s*(\d+)/i) || epTitle.match(/^(\d+)/);
         if (epNumMatch) {
           episodeNumber = parseInt(epNumMatch[1], 10);
         }
       }
+
+      const isDuplicate = episodes.some(
+        (e) => e.seasonNumber === seasonNumber && e.episodeNumber === episodeNumber
+      );
+      if (isDuplicate) return;
 
       episodes.push({
         id: epHref.replace(BASE_URL, "").replace(/^\//, ""),
@@ -194,6 +260,8 @@ const getDetails = async (slug) => {
         episodeNumber,
         url: epHref,
       });
+
+      perSeasonIndex++;
     });
 
     const result = {
@@ -236,7 +304,9 @@ const getEpisodesForSeason = async (postId, seasonNumber) => {
 
     const $ = cheerio.load(html);
     const episodes = [];
-    const episodeItems = $("li").length ? $("li") : $("#episode_by_temp > li, .post-lst > li");
+    const episodeItems = $("li").length
+      ? $("li")
+      : $("#episode_by_temp > li, #aa-episodes li, .post-lst > li, .episodes li");
 
     let perSeasonIndex = 1;
     episodeItems.each((_, el) => {
@@ -245,12 +315,23 @@ const getEpisodesForSeason = async (postId, seasonNumber) => {
       const epHref = epLink.attr("href") || "";
       if (!epHref || epHref.includes("javascript:")) return;
 
-      const numEpi = $el.find(".num-epi").first().text().trim();
-      const entryTitle = $el.find(".entry-title").first().text().trim();
+      const numEpi = $el.find(".num-epi, .ep-number, .e-num, .eptag").first().text().trim();
+      const entryTitle = $el.find(".entry-title, .ep-title, .tt").first().text().trim();
       const epTitle = numEpi || entryTitle;
 
       const seasonNum = parseInt(seasonNumber, 10) || 1;
-      const episodeNumber = perSeasonIndex++;
+      let episodeNumber = perSeasonIndex;
+
+      const sxxExxMatch = epTitle.match(/[sS](\d+)\s*[eE](\d+)/);
+      const numOnlyMatch = epTitle.match(/^(\d+)/);
+      if (sxxExxMatch) {
+        episodeNumber = parseInt(sxxExxMatch[2], 10);
+      } else if (numOnlyMatch) {
+        episodeNumber = parseInt(numOnlyMatch[1], 10);
+      }
+
+      const isDuplicate = episodes.some((e) => e.episodeNumber === episodeNumber);
+      if (isDuplicate) return;
 
       episodes.push({
         id: epHref.replace(BASE_URL, "").replace(/^\//, ""),
@@ -259,6 +340,8 @@ const getEpisodesForSeason = async (postId, seasonNumber) => {
         episodeNumber,
         url: epHref,
       });
+
+      perSeasonIndex++;
     });
 
     cache.set(cacheKey, episodes, 300);
@@ -486,4 +569,4 @@ const isAvailable = async () => {
   }
 };
 
-module.exports = { search, getDetails, getEpisodesForSeason, extractEmbedFromEpisode, getStream, isAvailable };
+module.exports = { search, getHomepage, getDetails, getEpisodesForSeason, extractEmbedFromEpisode, getStream, isAvailable };

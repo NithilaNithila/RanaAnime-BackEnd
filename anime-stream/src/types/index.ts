@@ -40,4 +40,27 @@ export interface StreamResponse {
   streams: Stream[];
 }
 
+export interface NewsArticle {
+  title: string;
+  slug: string;
+  excerpt: string;
+  content: string;
+  source: string;
+  sourceKey: string;
+  date: string | null;
+  image: string | null;
+  link: string;
+  originalSource?: string | null;
+}
+
+export interface NewsResponse {
+  success: boolean;
+  data: NewsArticle[];
+  meta: {
+    total: number;
+    returned: number;
+    hasMore: boolean;
+  };
+}
+
 

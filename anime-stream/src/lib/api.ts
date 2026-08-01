@@ -1,5 +1,28 @@
 import * as cheerio from "cheerio";
-import { AnimeItem, AnimeDetails, Episode, Stream, StreamResponse, StreamSourceOption } from "@/types";
+import { AnimeItem, AnimeDetails, Episode, Stream, StreamSourceOption, NewsArticle } from "@/types";
+
+interface ApiEpisode {
+  season: number;
+  episode: number;
+  title?: string;
+  url: string;
+  thumbnail?: string;
+}
+
+interface StreamErrorData {
+  sourceErrors?: unknown[];
+  attemptedSources?: unknown[];
+}
+
+class StreamError extends Error {
+  sourceErrors: unknown[];
+  attemptedSources: unknown[];
+  constructor(message: string, data: StreamErrorData = {}) {
+    super(message);
+    this.sourceErrors = data.sourceErrors || [];
+    this.attemptedSources = data.attemptedSources || [];
+  }
+}
 
 const BASE_URL = "https://watchanimeworld.org";
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000";
@@ -34,26 +57,6 @@ async function fetchPage(url: string): Promise<string> {
   } finally {
     clearTimeout(timeout);
   }
-}
-
-function parseItems($: cheerio.CheerioAPI, selector: string): AnimeItem[] {
-  const items: AnimeItem[] = [];
-  $(selector).each((_, el) => {
-    const $el = $(el);
-    const link = $el.find("a.lnk-blk").attr("href") || "";
-    const img = $el.find("img").attr("src") || $el.find("img").attr("data-original") || "";
-    const title = $el.find("h2.entry-title").text().trim() || $el.find("img").attr("alt")?.replace("Image ", "").trim() || "";
-    if (!link || !title) return;
-    const slug = link.replace(/\/+$/, "").split("/").pop() || "";
-    const type = link.includes("/movies/") ? "movie" : "series";
-    items.push({
-      title,
-      slug,
-      poster: img ? (img.startsWith("//") ? "https:" + img : img) : null,
-      type,
-    });
-  });
-  return items;
 }
 
 export async function getCatalog(section: string): Promise<AnimeItem[]> {
@@ -160,33 +163,46 @@ export async function searchAnime(query: string): Promise<AnimeItem[]> {
 
 function parseEpisodes($: cheerio.CheerioAPI): Episode[] {
   const episodes: Episode[] = [];
-  const items = $("#episode_by_temp > li").length
-    ? $("#episode_by_temp > li")
-    : $("li:has(article.episodes), li:has(a[href*='episode']), .eplister ul li, .post-lst > li");
-  let perSeasonIndex = 1;
+  const items = $("#episode_by_temp > li, #aa-episodes li, .episodes li").length
+    ? $("#episode_by_temp > li, #aa-episodes li, .episodes li")
+    : $(
+        "li:has(article.episodes), li:has(a[href*='episode']), " +
+        ".eplister ul li, .post-lst > li, " +
+        ".list-episode li, .listing li, " +
+        "ul.episodes li"
+      );
   items.each((_, li) => {
     const $li = $(li);
     const link = $li.find("a.lnk-blk").attr("href") || $li.find("a").first().attr("href") || "";
     if (!link || link.includes("javascript:")) return;
 
-    const numEpi = $li.find("span.num-epi").text().trim();
-    const titleEl = $li.find("h2.entry-title, .entry-title").first().text().trim();
+    const numEpi = $li.find("span.num-epi, .ep-number, .e-num, .eptag").first().text().trim();
+    const titleEl = $li.find("h2.entry-title, .entry-title, .ep-title, .tt").first().text().trim();
     const img = $li.find("img").attr("src") || "";
     const epLabel = numEpi || titleEl;
 
     let season = 1;
-    let episode = perSeasonIndex++;
+    let episode = episodes.length + 1;
 
+    const sxxExxMatch = epLabel.match(/[sS](\d+)\s*[eE](\d+)/);
     const multiMatch = epLabel.match(/(\d+)[xX](\d+)/);
-    if (multiMatch) {
+    if (sxxExxMatch) {
+      season = parseInt(sxxExxMatch[1], 10);
+      episode = parseInt(sxxExxMatch[2], 10);
+    } else if (multiMatch) {
       season = parseInt(multiMatch[1], 10);
       episode = parseInt(multiMatch[2], 10);
     } else {
-      const epNumMatch = epLabel.match(/episode\s*(\d+)/i) || epLabel.match(/(\d+)/);
+      const epNumMatch = epLabel.match(/episode\s*(\d+)/i) || epLabel.match(/^(\d+)/);
       if (epNumMatch) {
         episode = parseInt(epNumMatch[1], 10);
       }
     }
+
+    const isDuplicate = episodes.some(
+      (e) => e.season === season && e.episode === episode
+    );
+    if (isDuplicate) return;
 
     const epTitle = titleEl || epLabel || `S${season} E${episode}`;
     const thumbnail = img ? (img.startsWith("//") ? "https:" + img : img) : undefined;
@@ -211,7 +227,7 @@ export async function getAnimeDetails(slug: string): Promise<AnimeDetails | null
       const payload = await apiRes.json();
       if (payload?.success && payload?.data?.title) {
         const d = payload.data;
-        const episodes: Episode[] = (d.episodes || []).map((ep: any) => ({
+        const episodes: Episode[] = (d.episodes || []).map((ep: ApiEpisode) => ({
           season: ep.season,
           episode: ep.episode,
           title: ep.title || `S${ep.season} E${ep.episode}`,
@@ -251,13 +267,28 @@ export async function getAnimeDetails(slug: string): Promise<AnimeDetails | null
       if (contentType === "series") {
         episodes = parseEpisodes($);
 
-        const seasonLinks = $(".choose-season .sel-temp a");
-        if (seasonLinks.length > 1) {
-          const postId = seasonLinks.first().attr("data-post");
-          const currentSeason = parseInt($(".n_s").text().trim()) || 1;
-          for (let i = 0; i < seasonLinks.length; i++) {
-            const sNum = parseInt($(seasonLinks[i]).attr("data-season") || "0");
-            if (sNum !== currentSeason && postId) {
+        const seasonLinks = $(
+          ".choose-season .sel-temp a[data-post][data-season], " +
+          ".s-seasons a[data-season], " +
+          ".season-list a[data-season], " +
+          ".seasons a.season, " +
+          "a[data-season], " +
+          "[data-season] a"
+        );
+        const allSeasons: { num: number; postId: string }[] = [];
+        seasonLinks.each((_, el) => {
+          const $el = $(el);
+          const sNum = parseInt($el.attr("data-season") || "0", 10);
+          const pId = $el.attr("data-post") || "";
+          if (sNum && pId && !allSeasons.find((s) => s.num === sNum)) {
+            allSeasons.push({ num: sNum, postId: pId });
+          }
+        });
+        if (allSeasons.length > 1) {
+          const postId = allSeasons[0].postId;
+          const currentSeason = parseInt($(".n_s, .current-season, .selected-season").first().text().trim()) || (allSeasons[0]?.num || 1);
+          for (const s of allSeasons) {
+            if (s.num !== currentSeason && postId) {
               try {
                 const ajaxRes = await fetch(`${BASE_URL}/wp-admin/admin-ajax.php`, {
                   method: "POST",
@@ -267,7 +298,7 @@ export async function getAnimeDetails(slug: string): Promise<AnimeDetails | null
                   },
                   body: new URLSearchParams({
                     action: "action_select_season",
-                    season: String(sNum),
+                    season: String(s.num),
                     post: postId,
                   }).toString(),
                   signal: AbortSignal.timeout(TIMEOUT),
@@ -309,8 +340,20 @@ export async function getAnimeDetails(slug: string): Promise<AnimeDetails | null
   return null;
 }
 
-function ensureWatchAnimeWorldSource(sources: StreamSourceOption[]) {
-  return sources;
+export async function getNews(source?: string, limit = 20, offset = 0): Promise<{ articles: NewsArticle[]; meta: { total: number; hasMore: boolean } }> {
+  try {
+    const params = new URLSearchParams();
+    if (source && source !== "all") params.set("source", source);
+    params.set("limit", String(limit));
+    params.set("offset", String(offset));
+    const res = await fetch(`${API_BASE_URL}/api/news?${params}`, { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const json = await res.json();
+    return { articles: json.data || [], meta: json.meta || { total: 0, hasMore: false } };
+  } catch (e) {
+    console.error("getNews error:", e);
+    return { articles: [], meta: { total: 0, hasMore: false } };
+  }
 }
 
 export async function getAvailableStreamSources(): Promise<StreamSourceOption[]> {
@@ -326,12 +369,13 @@ export async function getAvailableStreamSources(): Promise<StreamSourceOption[]>
         id: source.id,
         name: source.name,
       }));
-    return ensureWatchAnimeWorldSource(sources);
+    return sources;
   } catch {
     return [
+      { id: "watchanimeworld", name: "WatchAnimeWorld" },
       { id: "123anime", name: "123Anime" },
       { id: "anipub", name: "Anipub" },
-      { id: "watchanimeworld", name: "WatchAnimeWorld" },
+      { id: "animoye", name: "AniMoye" },
     ];
   }
 }
@@ -361,10 +405,10 @@ export async function getStreamForSource(
       source === "watchanimeworld" ? "WatchAnimeWorld" : source;
 
     const errMsg = payload?.message || `${sourceName} is not available for this episode. Try another server.`;
-    const err = new Error(errMsg);
-    (err as any).sourceErrors = payload?.sourceErrors || [];
-    (err as any).attemptedSources = payload?.attemptedSources || [];
-    throw err;
+    throw new StreamError(errMsg, {
+      sourceErrors: payload?.sourceErrors || [],
+      attemptedSources: payload?.attemptedSources || [],
+    });
   }
 
   const embedUrl = payload?.data?.embedProxyUrl || payload?.data?.embedUrl;
@@ -381,43 +425,4 @@ export async function getStreamForSource(
     player: payload?.data?.source || source,
     url: embedUrl,
   };
-}
-
-export async function getStreams(
-  slug: string,
-  season?: number,
-  episode?: number
-): Promise<StreamResponse> {
-  let url: string;
-  if (season !== undefined && episode !== undefined) {
-    url = `${BASE_URL}/episode/${slug}-${season}x${episode}/`;
-  } else {
-    url = `${BASE_URL}/movies/${slug}`;
-  }
-
-  try {
-    const html = await fetchPage(url);
-    const $ = cheerio.load(html);
-    const streams: { player: string; url: string }[] = [];
-
-    $("iframe").each((_, el) => {
-      const src = $(el).attr("src") || $(el).attr("data-src") || "";
-      if (src) {
-        const fullUrl = src.startsWith("http") ? src : BASE_URL + src;
-        const player = src.includes("zephyrflick")
-          ? "zephyrflick"
-          : src.includes("speedostream")
-          ? "speedostream"
-          : src.includes("movembed")
-          ? "movembed"
-          : "default";
-        streams.push({ player, url: fullUrl });
-      }
-    });
-
-    return { streams };
-  } catch (e) {
-    console.error("getStreams error:", e);
-    return { streams: [] };
-  }
 }

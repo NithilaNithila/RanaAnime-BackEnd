@@ -12,9 +12,12 @@ module.exports = {
   nodeEnv,
 
   anilistApiUrl: process.env.ANILIST_API_URL || "https://graphql.anilist.co",
+  jikanApiUrl: process.env.JIKAN_API_URL || "https://api.jikan.moe/v4",
+  kitsuApiUrl: process.env.KITSU_API_URL || "https://kitsu.io/api/edge",
   anipubApiUrl: process.env.ANIPUB_API_URL || "https://anipub.xyz",
   allanimeBaseUrl: process.env.ALLANIME_BASE_URL || "https://123anime.la",
 
   watchanimeworldBaseUrl: process.env.WATCHANIMEWORLD_BASE_URL || "https://watchanimeworld.org",
+  animoyeBaseUrl: process.env.ANIMOYE_BASE_URL || "https://animoye.com",
   miruroApiUrl: process.env.MIRURO_API_URL || "",
 };

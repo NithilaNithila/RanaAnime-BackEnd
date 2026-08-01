@@ -86,6 +86,58 @@ const searchAnime = async (query) => {
   }
 };
 
+const getAnimeDetail = async (slug) => {
+  const cacheKey = `allanime_detail_${slug}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const { data: html } = await client.get(`${BASE_URL}/anime/${encodeURIComponent(slug)}`, { timeout: 6000 });
+    if (!html || typeof html !== "string" || html.length < 1000) return null;
+
+    const $ = cheerio.load(html);
+
+    const title =
+      $(".film-name.dynamic-name, h1.film-name, .detail .film-name, .film-name").first().text().trim() ||
+      $("h1").first().text().trim() ||
+      "";
+
+    const posterEl = $(".film-poster .film-poster-img, .film-poster img, .detail .film-poster img").first();
+    let image = posterEl.attr("data-src") || posterEl.attr("src") || posterEl.attr("data-original") || "";
+    if (image && !image.startsWith("http")) {
+      image = image.startsWith("/") ? BASE_URL + image : BASE_URL + "/" + image;
+    }
+
+    const description =
+      $(".film-description, .film-synopsis, .sc-detail .description, .detail .description").first().text().trim() || "";
+
+    let episodeCount = 0;
+    const epText =
+      $(".film-stats .item:contains('Episode') .name, .film-stats .item:contains('Episodes') .name").first().text().trim() ||
+      $(".film-stats .item .name:contains('Episode')").first().text().trim() ||
+      $(".episode-list .episode-item").length
+        ? String($(".episode-list .episode-item").length)
+        : "";
+    const epMatch = epText.match(/\d+/);
+    if (epMatch) episodeCount = parseInt(epMatch[0], 10);
+
+    if (!title) return null;
+
+    const result = {
+      slug,
+      title,
+      poster: image || "",
+      description,
+      episodeCount,
+    };
+    cache.set(cacheKey, result, 600);
+    return result;
+  } catch (err) {
+    console.error("[AllAnime] getAnimeDetail failed for slug:", slug, err.message);
+    return null;
+  }
+};
+
 const generateTitleVariations = (title, language = "sub") => {
   const baseTitle = title.replace(/\s*\(\s*(dub|sub)\s*\)\s*$/i, "").trim();
   const isDub = language === "dub";
@@ -473,4 +525,4 @@ async function resolveM3u8(animeSlug, episodeNumber) {
   return value;
 }
 
-module.exports = { resolveSlug, getEpisodeStreamInfo, resolveM3u8, client };
+module.exports = { searchAnime, getAnimeDetail, resolveSlug, getEpisodeStreamInfo, resolveM3u8, client };

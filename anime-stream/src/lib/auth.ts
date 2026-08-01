@@ -5,8 +5,25 @@ export interface AuthUser {
   username: string;
   email: string;
   avatar: string;
-  watchlist?: { anilistId: number; title: string; coverImage: string; addedAt: string }[];
-  watchHistory?: { anilistId: number; title: string; coverImage: string; episode: number; progress: number; lastWatched: string }[];
+  watchlist?: WatchlistItem[];
+  watchHistory?: HistoryItem[];
+}
+
+export interface WatchlistItem {
+  anilistId: number;
+  title: string;
+  coverImage: string;
+  addedAt: string;
+}
+
+export interface HistoryItem {
+  anilistId: number;
+  title: string;
+  coverImage: string;
+  season: number;
+  episode: number;
+  progress: number;
+  lastWatched: string;
 }
 
 export interface AuthResponse {
@@ -71,8 +88,69 @@ export function logout() {
   clearToken();
 }
 
-export async function apiFetch(path: string, options: RequestInit = {}) {
-  const headers: Record<string, string> = { ...authHeaders(), ...(options.headers as Record<string, string> || {}) };
-  const res = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
-  return res.json();
+export async function getWatchlist(): Promise<WatchlistItem[]> {
+  const res = await fetch(`${API_BASE_URL}/api/user/watchlist?limit=100`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error("Failed to load watchlist");
+  const data = await res.json();
+  return data?.data || [];
+}
+
+export async function addToWatchlist(anilistId: number, title: string, coverImage?: string): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/api/user/watchlist`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ anilistId, title, coverImage: coverImage || "" }),
+  });
+  if (!res.ok) throw new Error("Failed to update watchlist");
+}
+
+export async function removeFromWatchlist(anilistId: number): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/api/user/watchlist/${anilistId}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error("Failed to remove from watchlist");
+}
+
+export async function getHistory(): Promise<HistoryItem[]> {
+  const res = await fetch(`${API_BASE_URL}/api/user/history?limit=100`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error("Failed to load history");
+  const data = await res.json();
+  return data?.data || [];
+}
+
+export async function getContinueWatching(): Promise<HistoryItem[]> {
+  const res = await fetch(`${API_BASE_URL}/api/user/continue-watching`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error("Failed to load continue watching");
+  const data = await res.json();
+  return data?.data || [];
+}
+
+export async function updateWatchProgress(
+  anilistId: number,
+  title: string,
+  coverImage: string,
+  season: number,
+  episode: number,
+  progress?: number
+): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/api/user/history`, {
+    method: "POST",
+    headers: authHeaders(),
+    body: JSON.stringify({ anilistId, title, coverImage, season, episode, progress: progress || 0 }),
+  });
+  if (!res.ok) throw new Error("Failed to update history");
+}
+
+export async function getAnilistId(title: string): Promise<number | null> {
+  const res = await fetch(`${API_BASE_URL}/api/anilist/search?q=${encodeURIComponent(title)}&perPage=1`);
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data?.data?.[0]?.id ?? null;
 }

@@ -1,6 +1,7 @@
 const allAnimeService = require("../services/allAnimeService");
 const streamingService = require("../services/streamingService");
 const watchanimeworldService = require("../services/watchanimeworldService");
+const animoyeService = require("../services/animoyeService");
 const NodeCache = require("node-cache");
 
 const ALLOWED_PROXY_HOSTS = [
@@ -188,12 +189,19 @@ function normalizeStreamRequest(req) {
 }
 
 exports.getSources = async (req, res) => {
-  let watchAnimeWorldStatus = availabilityCache.get("watchanimeworld_status");
-  if (watchAnimeWorldStatus === undefined) {
-    const available = await watchanimeworldService.isAvailable();
-    watchAnimeWorldStatus = available ? "active" : "inactive";
-    availabilityCache.set("watchanimeworld_status", watchAnimeWorldStatus);
-  }
+  const checkAvailability = (cacheKey, probe) => {
+    const cached = availabilityCache.get(cacheKey);
+    if (cached !== undefined) return Promise.resolve();
+    const timeout = new Promise((resolve) => setTimeout(() => resolve(false), 6000));
+    return Promise.race([probe(), timeout]).then((ok) =>
+      availabilityCache.set(cacheKey, ok ? "active" : "inactive")
+    );
+  };
+
+  await Promise.all([
+    checkAvailability("watchanimeworld_status", () => watchanimeworldService.isAvailable()),
+    checkAvailability("animoye_status", () => animoyeService.isAvailable()),
+  ]);
 
   res.json({
     success: true,
@@ -203,7 +211,12 @@ exports.getSources = async (req, res) => {
       {
         id: "watchanimeworld",
         name: "WatchAnimeWorld",
-        status: watchAnimeWorldStatus,
+        status: availabilityCache.get("watchanimeworld_status") || "inactive",
+      },
+      {
+        id: "animoye",
+        name: "AniMoye",
+        status: availabilityCache.get("animoye_status") || "inactive",
       },
     ],
   });
@@ -221,7 +234,7 @@ exports.getStream = async (req, res, next) => {
       return res.status(400).json({ success: false, message: "episode must be a positive integer" });
     }
 
-    const validSources = ["123anime", "anipub", "watchanimeworld"];
+    const validSources = ["123anime", "anipub", "watchanimeworld", "animoye"];
     if (!validSources.includes(selectedSource)) {
       return res.status(400).json({ success: false, message: `Invalid source "${selectedSource}". Valid sources: ${validSources.join(", ")}` });
     }

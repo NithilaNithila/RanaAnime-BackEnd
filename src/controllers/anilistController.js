@@ -3,7 +3,7 @@ const anilistService = require("../services/anilistService");
 const MAX_PER_PAGE = 50;
 
 function clampPerPage(val, defaultVal) {
-  return Math.min(parseInt(val) || defaultVal, MAX_PER_PAGE);
+  return Math.min(Math.max(parseInt(val) || defaultVal, 1), MAX_PER_PAGE);
 }
 
 exports.search = async (req, res, next) => {
@@ -55,6 +55,20 @@ exports.getMediaInfo = async (req, res, next) => {
     const info = await anilistService.getMediaInfo(parsedId);
     if (!info) return res.status(404).json({ success: false, message: "Anime not found" });
     res.json({ success: true, data: info });
+  } catch (err) {
+    next(err);
+  }
+};
+
+exports.getByGenre = async (req, res, next) => {
+  try {
+    const { slug } = req.params;
+    const { page, perPage } = req.query;
+    const genreName = slug
+      .replace(/-/g, " ")
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+    const result = await anilistService.getByGenre(genreName, parseInt(page) || 1, clampPerPage(perPage, 20));
+    res.json({ success: true, data: result.results, pageInfo: result.pageInfo });
   } catch (err) {
     next(err);
   }

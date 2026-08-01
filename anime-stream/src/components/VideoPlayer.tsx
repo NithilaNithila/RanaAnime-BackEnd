@@ -9,9 +9,10 @@ const SOURCE_NAMES: Record<string, string> = {
   "123anime": "123Anime",
   anipub: "Anipub",
   watchanimeworld: "WatchAnimeWorld",
+  animoye: "AniMoye",
 };
 
-const SOURCE_ORDER = ["watchanimeworld", "123anime", "anipub"];
+const SOURCE_ORDER = ["watchanimeworld", "123anime", "anipub", "animoye"];
 
 function getFriendlyName(sourceId: string): string {
   return SOURCE_NAMES[sourceId] || sourceId;
@@ -32,7 +33,7 @@ export default function VideoPlayer({
 }) {
   const [activeUrl, setActiveUrl] = useState("");
   const [activeSource, setActiveSource] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const loadIdRef = useRef(0);
 
@@ -45,52 +46,69 @@ export default function VideoPlayer({
     return SOURCE_ORDER.filter((id) => map.has(id)).map((id) => map.get(id)!);
   }, [initialSources]);
 
-  const loadStream = useCallback(
+  const fetchStream = useCallback(
     async (sourceId: string) => {
-      const myId = ++loadIdRef.current;
-      setLoading(true);
-      setError(null);
-      setActiveUrl("");
-
-      try {
-        const stream = await getStreamForSource(animeTitle, episode, sourceId, season);
-        if (myId !== loadIdRef.current) return;
-        setActiveUrl(stream.url);
-        setActiveSource(sourceId);
-        setError(null);
-      } catch (err) {
-        if (myId !== loadIdRef.current) return;
-        const msg = err instanceof Error ? err.message : `${getFriendlyName(sourceId)} is not available. Try another server.`;
-        setError(msg);
-        showToast("error", msg, 6000);
-      } finally {
-        if (myId === loadIdRef.current) setLoading(false);
-      }
+      return getStreamForSource(animeTitle, episode, sourceId, season);
     },
     [animeTitle, episode, season]
   );
+
+  const [prevDisplayedSources, setPrevDisplayedSources] = useState(displayedSources);
+  if (displayedSources !== prevDisplayedSources) {
+    setPrevDisplayedSources(displayedSources);
+    setActiveUrl("");
+    setActiveSource("");
+    setError(null);
+    setLoading(true);
+  }
 
   useEffect(() => {
     if (!displayedSources.length) return;
     const preferred = SOURCE_ORDER.find((id) => displayedSources.some((s) => s.id === id)) || displayedSources[0]?.id;
     if (!preferred) return;
-    loadStream(preferred);
-    return () => { loadIdRef.current++; };
-  }, [displayedSources, loadStream]);
+    const loadId = ++loadIdRef.current;
+    fetchStream(preferred)
+      .then((stream) => {
+        if (loadId !== loadIdRef.current) return;
+        setActiveUrl(stream.url);
+        setActiveSource(preferred);
+        setError(null);
+      })
+      .catch((err: unknown) => {
+        if (loadId !== loadIdRef.current) return;
+        const msg = err instanceof Error ? err.message : `${getFriendlyName(preferred)} is not available. Try another server.`;
+        setError(msg);
+        showToast("error", msg, 6000);
+      })
+      .finally(() => {
+        if (loadId === loadIdRef.current) setLoading(false);
+      });
+    const currentLoadId = loadIdRef.current;
+    return () => { loadIdRef.current = currentLoadId + 1; };
+  }, [displayedSources, fetchStream]);
 
-  if (!initialSources.length) {
-    return (
-      <div className="aspect-video bg-gray-900 rounded-lg flex items-center justify-center border border-gray-800">
-        <div className="text-center text-gray-500">
-          <svg className="w-16 h-16 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15.91 11.672a.375.375 0 010 .656l-5.603 3.113a.375.375 0 01-.557-.328V8.887c0-.286.307-.466.557-.327l5.603 3.112z" />
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <p>No streams available</p>
-        </div>
-      </div>
-    );
-  }
+  const handleSourceClick = (sourceId: string) => {
+    setLoading(true);
+    setError(null);
+    setActiveUrl("");
+    const loadId = ++loadIdRef.current;
+    fetchStream(sourceId)
+      .then((stream) => {
+        if (loadId !== loadIdRef.current) return;
+        setActiveUrl(stream.url);
+        setActiveSource(sourceId);
+        setError(null);
+      })
+      .catch((err: unknown) => {
+        if (loadId !== loadIdRef.current) return;
+        const msg = err instanceof Error ? err.message : `${getFriendlyName(sourceId)} is not available. Try another server.`;
+        setError(msg);
+        showToast("error", msg, 6000);
+      })
+      .finally(() => {
+        if (loadId === loadIdRef.current) setLoading(false);
+      });
+  };
 
   return (
     <div className="space-y-3">
@@ -133,7 +151,7 @@ export default function VideoPlayer({
         {displayedSources.map((source) => (
           <button
             key={source.id}
-            onClick={() => void loadStream(source.id)}
+            onClick={() => void handleSourceClick(source.id)}
             disabled={loading}
             className={`px-3 py-1.5 text-xs rounded-lg font-medium transition-all disabled:opacity-50 ${
               source.id === activeSource && !loading

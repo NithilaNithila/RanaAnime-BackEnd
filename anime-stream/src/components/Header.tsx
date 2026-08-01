@@ -42,6 +42,12 @@ export default function Header() {
           >
             Popular
           </Link>
+          <Link
+            href="/news"
+            className="hover:text-white transition-colors"
+          >
+            News
+          </Link>
         </nav>
 
         <form

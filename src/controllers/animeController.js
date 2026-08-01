@@ -39,37 +39,44 @@ async function getEpisodesFromAnilist(title) {
     const mediaInfo = await anilistService.getMediaInfo(match.id);
     if (!mediaInfo) return null;
 
-    const seasons = mediaInfo.seasons || [];
+    const seasons = [...(mediaInfo.seasons || [])];
     const episodes = [];
+    let hasUnknownCount = false;
 
     for (const s of seasons) {
-      const count = Math.min(s.episodeCount || 0, MAX_EPISODES - episodes.length);
+      if (!s.episodeCount || s.episodeCount <= 0) {
+        hasUnknownCount = true;
+        continue;
+      }
+      const count = Math.min(s.episodeCount, MAX_EPISODES - episodes.length);
       for (let i = 0; i < count; i++) {
-        const epNum = (s.startEpisode || 1) + i;
         episodes.push({
           season: s.seasonNumber,
-          episode: epNum,
-          title: `S${s.seasonNumber} E${epNum}`,
+          episode: i + 1,
+          title: `S${s.seasonNumber} E${i + 1}`,
           url: "",
         });
       }
       if (episodes.length >= MAX_EPISODES) break;
     }
 
-    if (episodes.length === 0) {
+    if (episodes.length === 0 || hasUnknownCount) {
       let totalEp = mediaInfo.episodes || 0;
       if (!totalEp && mediaInfo.nextAiringEpisode?.episode) {
         totalEp = mediaInfo.nextAiringEpisode.episode - 1;
       }
-      if (totalEp > 0) {
-        const count = Math.min(totalEp, MAX_EPISODES);
-        for (let i = 1; i <= count; i++) {
+      if (totalEp > 0 && episodes.length < totalEp) {
+        const remaining = Math.min(totalEp - episodes.length, MAX_EPISODES - episodes.length);
+        for (let i = 1; i <= remaining; i++) {
           episodes.push({
             season: 1,
-            episode: i,
-            title: `Episode ${i}`,
+            episode: episodes.length + 1,
+            title: `Episode ${episodes.length + 1}`,
             url: "",
           });
+        }
+        if (seasons.length > 0 && seasons[0].seasonNumber === 1) {
+          seasons[0].episodeCount = episodes.length;
         }
       }
     }
@@ -78,6 +85,7 @@ async function getEpisodesFromAnilist(title) {
 
     return {
       episodes,
+      seasons,
       title: mediaInfo.title?.english || mediaInfo.title?.romaji || null,
       description: mediaInfo.description || null,
       poster: mediaInfo.coverImage?.large || mediaInfo.coverImage?.medium || null,
@@ -137,6 +145,7 @@ exports.getAnimeDetails = async (req, res, next) => {
         metadata.poster = metadata.poster || anilistData.poster;
         metadata.genres = anilistData.genres || [];
         metadata.type = anilistData.type || "series";
+        metadata.seasons = metadata.seasons || anilistData.seasons || [];
         console.log(`[AnimeController] AniList fallback: found ${allEpisodes.length} episodes`);
       }
     }
@@ -162,6 +171,12 @@ exports.getAnimeDetails = async (req, res, next) => {
 
     const isMovie = slug.startsWith("movies/");
 
+    const allSeasons = details?.seasons?.length
+      ? details.seasons
+      : metadata.seasons?.length
+        ? metadata.seasons
+        : [];
+
     res.json({
       success: true,
       data: {
@@ -174,7 +189,7 @@ exports.getAnimeDetails = async (req, res, next) => {
         runtime: null,
         episodes,
         type: metadata.type || (isMovie ? "movie" : "series"),
-        seasons: details?.seasons || [],
+        seasons: allSeasons,
       },
     });
   } catch (err) {

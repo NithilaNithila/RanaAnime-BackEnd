@@ -11,6 +11,9 @@ const streamRoutes = require("./routes/stream");
 const authRoutes = require("./routes/auth");
 const userRoutes = require("./routes/user");
 const animeRoutes = require("./routes/anime");
+const newsRoutes = require("./routes/news");
+const streamingMetadataRoutes = require("./routes/streamingMetadata");
+const imageProxyRoutes = require("./routes/imageProxy");
 
 const app = express();
 
@@ -41,6 +44,9 @@ app.use("/api/stream", streamRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/anime", animeRoutes);
+app.use("/api/news", newsRoutes);
+app.use("/api/metadata", streamingMetadataRoutes);
+app.use("/api/image", imageProxyRoutes);
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });

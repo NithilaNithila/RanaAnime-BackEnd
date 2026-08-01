@@ -1,6 +1,7 @@
 import { getAnimeDetails } from "@/lib/api";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import WatchlistButton from "@/components/WatchlistButton";
 
 export default async function AnimeDetailPage({
   params,
@@ -50,7 +51,10 @@ export default async function AnimeDetailPage({
 
         {/* Info */}
         <div className="flex-1">
-          <h1 className="text-3xl font-bold mb-3">{anime.title}</h1>
+          <div className="flex items-start gap-3 mb-3 flex-wrap">
+            <h1 className="text-3xl font-bold">{anime.title}</h1>
+            {anime.title ? <WatchlistButton title={anime.title} /> : null}
+          </div>
 
           <div className="flex flex-wrap gap-2 mb-4">
             <span className="px-3 py-1 text-xs rounded-full bg-purple-600/20 text-purple-400 border border-purple-600/30">
