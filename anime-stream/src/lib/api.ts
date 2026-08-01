@@ -27,6 +27,7 @@ class StreamError extends Error {
 const BASE_URL = "https://watchanimeworld.org";
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000";
 const TIMEOUT = 15000;
+const DETAIL_TIMEOUT = 45000;
 
 const USER_AGENTS = [
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
@@ -221,7 +222,7 @@ function parseEpisodes($: cheerio.CheerioAPI): Episode[] {
 export async function getAnimeDetails(slug: string): Promise<AnimeDetails | null> {
   try {
     const apiRes = await fetch(`${API_BASE_URL}/api/anime/details?slug=${encodeURIComponent(slug)}`, {
-      signal: AbortSignal.timeout(TIMEOUT),
+      signal: AbortSignal.timeout(DETAIL_TIMEOUT),
     });
     if (apiRes.ok) {
       const payload = await apiRes.json();

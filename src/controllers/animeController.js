@@ -12,15 +12,20 @@ function slugToSearchTitle(slug) {
 }
 
 async function getWawDetails(slug) {
-  const variations = [slug];
-  if (!slug.startsWith("series/") && !slug.startsWith("movies/")) {
-    variations.unshift(`series/${slug}`, `movies/${slug}`);
+  let candidates = [];
+  if (slug.startsWith("series/") || slug.startsWith("movies/")) {
+    candidates = [slug];
+  } else {
+    candidates = [`series/${slug}`, `movies/${slug}`];
   }
-  for (const v of variations) {
-    try {
-      const details = await watchanimeworldService.getDetails(v);
-      if (details && details.title) return details;
-    } catch {}
+  const settled = await Promise.allSettled(
+    candidates.map((v) => watchanimeworldService.getDetails(v))
+  );
+  for (let i = 0; i < settled.length; i++) {
+    const r = settled[i];
+    if (r.status === "fulfilled" && r.value && r.value.title) {
+      return { ...r.value, isMovie: candidates[i].startsWith("movies/") };
+    }
   }
   return null;
 }
@@ -115,7 +120,17 @@ exports.getAnimeDetails = async (req, res, next) => {
         title: details.title,
         description: details.description || null,
         poster: details.image || null,
+        type: details.isMovie ? "movie" : "series",
       };
+
+      if (details.isMovie && allEpisodes.length === 0) {
+        allEpisodes.push({
+          seasonNumber: 1,
+          episodeNumber: 1,
+          title: details.title,
+          url: `https://watchanimeworld.org/${details.slug}`,
+        });
+      }
 
       if (details.seasons && details.seasons.length > 1 && details.id) {
         for (const s of details.seasons) {
@@ -169,7 +184,7 @@ exports.getAnimeDetails = async (req, res, next) => {
       return res.status(404).json({ success: false, message: "Anime not found" });
     }
 
-    const isMovie = slug.startsWith("movies/");
+    const isMovie = slug.startsWith("movies/") || !!details?.isMovie;
 
     const allSeasons = details?.seasons?.length
       ? details.seasons

@@ -64,6 +64,10 @@ const requestPage = async (path, options = {}) => {
       return { html, url: requestUrl, baseUrl };
     } catch (err) {
       errors.push(`${requestUrl}: ${err.message}`);
+      const status = err.response && err.response.status;
+      if (status === 400 || status === 404) {
+        break;
+      }
     }
   }
 
