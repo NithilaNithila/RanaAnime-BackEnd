@@ -31,14 +31,6 @@ const UserSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
-    watchlist: [
-      {
-        anilistId: { type: Number, required: true },
-        title: { type: String, required: true },
-        coverImage: { type: String, default: "" },
-        addedAt: { type: Date, default: Date.now },
-      },
-    ],
     watchHistory: [
       {
         anilistId: { type: Number, required: true },

@@ -1,4 +1,4 @@
-const allAnimeService = require("../services/allAnimeService");
+﻿const allAnimeService = require("../services/allAnimeService");
 const streamingService = require("../services/streamingService");
 const watchanimeworldService = require("../services/watchanimeworldService");
 const animoyeService = require("../services/animoyeService");
@@ -66,10 +66,18 @@ const ALLOWED_PROXY_HOSTS = [
   "zephyrflick.net",
   "as-cdn.top",
   "as-cdn21.top",
+  "iqsmartgames.com",
 ];
 
 const cdnHeaderCache = new NodeCache({ stdTTL: 600 });
 const availabilityCache = new NodeCache({ stdTTL: 300 });
+
+function getSelfBase(req) {
+  const forwardedProto = req.headers["x-forwarded-proto"];
+  const proto = forwardedProto || req.protocol;
+  const host = req.headers["x-forwarded-host"] || req.get("host");
+  return `${proto}://${host}`;
+}
 
 function isAllowedUrl(urlStr) {
   try {
@@ -80,6 +88,19 @@ function isAllowedUrl(urlStr) {
   } catch {
     return false;
   }
+}
+
+function injectBaseTag(html, origin) {
+  const baseTag = `<base href="${origin}/">`;
+  const headMatch = html.match(/<head\b[^>]*>/i);
+  if (headMatch) {
+    return html.replace(/<head\b[^>]*>/i, (m) => m + baseTag);
+  }
+  const htmlMatch = html.match(/<html\b[^>]*>/i);
+  if (htmlMatch) {
+    return html.replace(/<html\b[^>]*>/i, (m) => m + `<head>${baseTag}</head>`);
+  }
+  return baseTag + html;
 }
 
 function getPlaylistBase(urlStr) {
@@ -191,17 +212,15 @@ function normalizeStreamRequest(req) {
 exports.getSources = async (req, res) => {
   const checkAvailability = (cacheKey, probe) => {
     const cached = availabilityCache.get(cacheKey);
-    if (cached !== undefined) return Promise.resolve();
+    if (cached !== undefined) return;
     const timeout = new Promise((resolve) => setTimeout(() => resolve(false), 6000));
-    return Promise.race([probe(), timeout]).then((ok) =>
-      availabilityCache.set(cacheKey, ok ? "active" : "inactive")
-    );
+    Promise.race([probe(), timeout])
+      .then((ok) => availabilityCache.set(cacheKey, ok ? "active" : "inactive"))
+      .catch(() => availabilityCache.set(cacheKey, "inactive"));
   };
 
-  await Promise.all([
-    checkAvailability("watchanimeworld_status", () => watchanimeworldService.isAvailable()),
-    checkAvailability("animoye_status", () => animoyeService.isAvailable()),
-  ]);
+  checkAvailability("watchanimeworld_status", () => watchanimeworldService.isAvailable());
+  checkAvailability("animoye_status", () => animoyeService.isAvailable());
 
   res.json({
     success: true,
@@ -239,7 +258,6 @@ exports.getStream = async (req, res, next) => {
       return res.status(400).json({ success: false, message: `Invalid source "${selectedSource}". Valid sources: ${validSources.join(", ")}` });
     }
 
-    const host = `${req.protocol}://${req.get("host")}`;
     const stream = await streamingService.getStream(title, parsedEpisode, selectedLanguage, selectedSource, season);
 
     if (!stream?.success) {
@@ -251,9 +269,13 @@ exports.getStream = async (req, res, next) => {
       });
     }
 
+    const reqBase = getSelfBase(req);
+
     let embedProxyUrl = null;
+    let providerEmbedUrl = null;
     if (stream.embedUrl) {
-      embedProxyUrl = `${host}/api/stream/embed?url=${encodeURIComponent(stream.embedUrl)}`;
+      providerEmbedUrl = stream.embedUrl;
+      embedProxyUrl = `${reqBase}/api/stream/embed?url=${encodeURIComponent(stream.embedUrl)}`;
     }
 
     let hlsProxyUrl = null;
@@ -262,8 +284,11 @@ exports.getStream = async (req, res, next) => {
       const hlsParams = new URLSearchParams({ url: hlsSource });
       if (stream.slug) hlsParams.set("slug", stream.slug);
       if (stream.episode) hlsParams.set("ep", String(stream.episode));
-      hlsProxyUrl = `${host}/api/stream/hls-proxy?${hlsParams.toString()}`;
+      hlsProxyUrl = `${reqBase}/api/stream/hls-proxy?${hlsParams.toString()}`;
     }
+
+    const hasPlayableUrl = Boolean(embedProxyUrl || hlsProxyUrl);
+    const playbackMode = hlsProxyUrl ? "hls" : embedProxyUrl ? "iframe" : "none";
 
     res.json({
       success: true,
@@ -273,8 +298,11 @@ exports.getStream = async (req, res, next) => {
         requestedLanguage,
         m3u8: stream.m3u8 || null,
         hlsProxyUrl,
-        embedUrl: stream.embedUrl || null,
+        embedUrl: embedProxyUrl || hlsProxyUrl || null,
         embedProxyUrl,
+        providerEmbedUrl,
+        iframeUrl: embedProxyUrl || null,
+        directUrl: providerEmbedUrl || null,
         directM3u8: stream.directM3u8 || null,
         intro: stream.intro || null,
         outro: stream.outro || null,
@@ -285,10 +313,18 @@ exports.getStream = async (req, res, next) => {
         slug: stream.slug || null,
         seriesId: stream.seriesId || null,
         episodeId: stream.episodeId || null,
+        season: stream.season || season || null,
+        episode: stream.episode || parsedEpisode || null,
+        requestedSeason: stream.requestedSeason || season || null,
+        requestedEpisode: stream.requestedEpisode || parsedEpisode || null,
+        resolvedEpisode: stream.resolvedEpisode || stream.episode || parsedEpisode || null,
         title: stream.title || title,
         image: stream.image || null,
         seasons: stream.seasons || [],
         attemptedSources: stream.attemptedSources || [],
+        playbackMode,
+        hasPlayableUrl,
+        canPlay: hasPlayableUrl,
       },
     });
   } catch (err) {
@@ -335,7 +371,7 @@ exports.getHlsProxy = async (req, res, next) => {
     });
 
     const masterBase = getPlaylistBase(masterUrl);
-    const selfBase = `${req.protocol}://${req.get("host")}`;
+    const selfBase = getSelfBase(req);
 
     const rewritten = rewriteM3u8(m3u8Res.data, masterBase, selfBase, slug, ep);
 
@@ -393,7 +429,7 @@ exports.getGenericHlsProxy = async (req, res, next) => {
 
     const content = typeof m3u8Res.data === "string" ? m3u8Res.data : "";
     const playlistBase = getPlaylistBase(url);
-    const selfBase = `${req.protocol}://${req.get("host")}`;
+    const selfBase = getSelfBase(req);
     const rewritten = rewriteM3u8(content, playlistBase, selfBase, slug || "", ep || "");
 
     res.set({
@@ -446,7 +482,7 @@ exports.getProxy = async (req, res, next) => {
       });
       const content = typeof body.data === "string" ? body.data : "";
       const playlistBase = getPlaylistBase(url);
-      const selfBase = `${req.protocol}://${req.get("host")}`;
+      const selfBase = getSelfBase(req);
       const rewritten = rewriteM3u8(content, playlistBase, selfBase, slug, ep);
       res.set({
         "Content-Type": "application/vnd.apple.mpegurl",
@@ -498,20 +534,49 @@ exports.getEmbedProxy = async (req, res, next) => {
   }
 
   try {
-    const upstream = await allAnimeService.client.get(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      },
-      timeout: 10000,
-      responseType: "text",
-    });
+    let upstreamOrigin = "";
+    try { upstreamOrigin = new URL(url).origin; } catch {}
+
+    const MAX_RETRIES = 3;
+    let upstream = null;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        upstream = await allAnimeService.client.get(url, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            ...(upstreamOrigin ? { Referer: upstreamOrigin } : {}),
+          },
+          timeout: 15000,
+          responseType: "text",
+        });
+        break;
+      } catch (err) {
+        if (attempt === MAX_RETRIES) throw err;
+        await new Promise((r) => setTimeout(r, 700 * attempt));
+      }
+    }
 
     res.set({
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "public, max-age=300",
       "Access-Control-Allow-Origin": "*",
     });
-    res.send(upstream.data);
+
+    let html = upstream.data;
+    if (upstreamOrigin && typeof html === "string") {
+      html = html.replace(
+        /((?:src|href|poster|action|data-src|data-link|data-poster|data-iframe|data-href|data-video)\s*=\s*["'])\/(?!\/)/gi,
+        `$1${upstreamOrigin}/`
+      );
+      html = html.replace(
+        /(["'`])\/(?!\/|\s|>|["'`])/g,
+        `$1${upstreamOrigin}/`
+      );
+      html = injectBaseTag(html, upstreamOrigin);
+    }
+    res.send(html);
   } catch (err) {
     console.error("[Embed Proxy] Error:", err.message);
     if (!res.headersSent) {

@@ -7,7 +7,10 @@ const cache = new NodeCache({ stdTTL: 1800 });
 const client = axios.create({
   baseURL: config.anilistApiUrl,
   timeout: 10000,
-  headers: { "Content-Type": "application/json" },
+  headers: {
+    "Content-Type": "application/json",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  },
 });
 
 const transformMedia = (m) => ({

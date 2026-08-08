@@ -26,7 +26,7 @@ exports.getInfo = async (req, res, next) => {
 exports.getRecentlyAdded = async (req, res, next) => {
   try {
     const { limit } = req.query;
-    const data = await streamingMetadataService.getRecentlyAdded(Math.min(parseInt(limit) || 24, 50));
+    const data = await streamingMetadataService.getRecentlyAdded(Math.min(parseInt(limit) || 24, 200));
     res.json({ success: true, source: "watchanimeworld", data });
   } catch (err) {
     next(err);

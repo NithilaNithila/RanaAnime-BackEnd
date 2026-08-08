@@ -8,7 +8,7 @@ const connectDB = async () => {
     });
     console.log(`MongoDB connected: ${conn.connection.host}`);
   } catch (err) {
-    console.warn(`MongoDB unavailable (auth/watchlist features disabled): ${err.message}`);
+    console.warn(`MongoDB unavailable (auth features disabled): ${err.message}`);
   }
 };
 

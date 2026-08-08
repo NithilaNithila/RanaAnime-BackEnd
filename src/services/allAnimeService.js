@@ -154,6 +154,13 @@ const generateTitleVariations = (title, language = "sub") => {
 
   let t = baseTitle;
 
+  t = t.replace(/\s*:\s*/g, " ").replace(/\s+/g, " ").trim();
+  if (t.length >= 3 && !variations.includes(t) && !variations.includes(`${t} (Dub)`)) {
+    variations.push(isDub ? `${t} (Dub)` : t);
+  }
+
+  t = baseTitle;
+
   t = t.replace(/\s*:\s*[^:]+$/i, "").trim();
   if (t.length >= 3 && !variations.includes(t)) {
     variations.push(isDub ? `${t} (Dub)` : t);

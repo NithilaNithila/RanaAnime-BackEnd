@@ -84,7 +84,6 @@ exports.getMe = async (req, res, next) => {
         username: user.username,
         email: user.email,
         avatar: user.avatar,
-        watchlist: user.watchlist,
         watchHistory: user.watchHistory,
       },
     });

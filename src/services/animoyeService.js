@@ -141,6 +141,12 @@ function extractScriptData(html) {
 
 function parseSeasonEpisodes(episodesObj) {
   const seasons = [];
+  const toLocal = (epList) => {
+    const nums = epList.map(ep => typeof ep === "number" ? ep : parseInt(ep, 10)).filter(n => !isNaN(n));
+    if (!nums.length) return [];
+    const start = nums[0];
+    return nums.map(n => n - start + 1);
+  };
 
   if (Array.isArray(episodesObj)) {
     episodesObj.forEach((episodes, idx) => {
@@ -148,7 +154,7 @@ function parseSeasonEpisodes(episodesObj) {
       seasons.push({
         seasonNumber: idx + 1,
         episodeCount: epList.length,
-        episodes: epList.map(ep => typeof ep === "number" ? ep : parseInt(ep, 10)).filter(n => !isNaN(n)),
+        episodes: toLocal(epList),
       });
     });
   } else if (episodesObj && typeof episodesObj === "object") {
@@ -157,7 +163,7 @@ function parseSeasonEpisodes(episodesObj) {
       seasons.push({
         seasonNumber: parseInt(seasonNum, 10),
         episodeCount: epList.length,
-        episodes: epList.map(ep => typeof ep === "number" ? ep : parseInt(ep, 10)).filter(n => !isNaN(n)),
+        episodes: toLocal(epList),
       });
     }
   }
@@ -214,8 +220,11 @@ async function getStream(title, episode, language, season) {
       return { success: false, reason: `Season ${targetSeason} not available on AniMoye (available: ${available})` };
     }
 
-    const epInSeason = seasonData.indexOf(episode);
-    if (epInSeason === -1) {
+    const episodeNum = Number(episode) || 1;
+    const startEp = seasonData.length ? Number(seasonData[0]) : null;
+    const globalForLocal = startEp != null ? startEp + episodeNum - 1 : episodeNum;
+    const existsInSeason = seasonData.includes(episodeNum) || seasonData.includes(globalForLocal);
+    if (!existsInSeason) {
       return { success: false, reason: `Episode ${episode} not found in Season ${targetSeason} on AniMoye` };
     }
 
@@ -226,7 +235,7 @@ async function getStream(title, episode, language, season) {
       return { success: false, reason: "AniMoye: missing embed base URL" };
     }
 
-    const embedUrl = `${details.embedBase}/${details.tmdbId}/${targetSeason}/${episode}?key=${details.streamKey}`;
+    const embedUrl = `${details.embedBase}/${details.tmdbId}/${targetSeason}/${episodeNum}?key=${details.streamKey}`;
 
     return {
       success: true,

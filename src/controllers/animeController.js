@@ -105,7 +105,8 @@ async function getEpisodesFromAnilist(title) {
 
 exports.getAnimeDetails = async (req, res, next) => {
   try {
-    const { slug } = req.query;
+    const { slug: querySlug } = req.query;
+    const slug = querySlug || req.params?.slug;
     if (!slug) {
       return res.status(400).json({ success: false, message: "slug is required" });
     }
@@ -186,6 +187,8 @@ exports.getAnimeDetails = async (req, res, next) => {
 
     const isMovie = slug.startsWith("movies/") || !!details?.isMovie;
 
+    const bareSlug = (details?.slug || slug).replace(/^(series|movies)\//, "");
+
     const allSeasons = details?.seasons?.length
       ? details.seasons
       : metadata.seasons?.length
@@ -196,7 +199,7 @@ exports.getAnimeDetails = async (req, res, next) => {
       success: true,
       data: {
         title: metadata.title,
-        slug: details?.slug || slug,
+        slug: bareSlug,
         description: metadata.description || null,
         poster: metadata.poster || null,
         genres: metadata.genres || [],

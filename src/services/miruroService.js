@@ -32,7 +32,7 @@ const search = async (query) => {
   if (cached) return cached;
 
   try {
-    const { data } = await retryGet(`/api/search`, { params: { query } });
+    const { data } = await retryGet(`/search`, { params: { query } });
     const raw = data?.results;
     const items = raw?.results || (Array.isArray(raw) ? raw : []);
     const results = items.map((a) => ({
@@ -59,7 +59,7 @@ const getEpisodes = async (anilistId) => {
   if (cached) return cached;
 
   try {
-    const { data } = await retryGet(`/api/episodes/${anilistId}`, {}, 1, 1000);
+    const { data } = await retryGet(`/episodes/${anilistId}`, {}, 1, 1000);
     const raw = data?.results || data;
     if (raw?.providers) {
       cache.set(cacheKey, raw.providers, 600);
@@ -99,7 +99,7 @@ const getStream = async (anilistId, episodeNumber, language = "sub") => {
 
     const slug = ep.id || ep.slug || ep.url || `${anilistId}-ep-${episodeNumber}`;
     try {
-      const { data } = await retryGet(`/api/stream`, {
+      const { data } = await retryGet(`/stream`, {
         params: { provider: provName, anilistId, category, slug },
       }, 1, 1000);
 
@@ -127,7 +127,7 @@ const getStream = async (anilistId, episodeNumber, language = "sub") => {
         return result;
       }
 
-      const { data: watchData } = await retryGet(`/api/watch/${provName}/${anilistId}/${category}/${slug}`, {}, 1, 1000);
+      const { data: watchData } = await retryGet(`/watch/${provName}/${anilistId}/${category}/${slug}`, {}, 1, 1000);
       if (watchData?.streams?.length > 0) {
         const stream = watchData.streams[0];
         const result = {

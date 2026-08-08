@@ -13,9 +13,12 @@ const userRoutes = require("./routes/user");
 const animeRoutes = require("./routes/anime");
 const newsRoutes = require("./routes/news");
 const streamingMetadataRoutes = require("./routes/streamingMetadata");
+const metadataRoutes = require("./routes/metadata");
 const imageProxyRoutes = require("./routes/imageProxy");
 
 const app = express();
+
+app.set("trust proxy", 1);
 
 const corsOptions = {};
 if (Array.isArray(config.corsOrigin)) {
@@ -33,7 +36,15 @@ if (Array.isArray(config.corsOrigin)) {
   corsOptions.origin = config.corsOrigin;
 }
 
-app.use(helmet());
+app.use(
+  helmet({
+    crossOriginEmbedderPolicy: false,
+    crossOriginOpenerPolicy: false,
+    crossOriginResourcePolicy: false,
+    contentSecurityPolicy: false,
+    frameguard: false,
+  })
+);
 app.use(cors({ ...corsOptions, credentials: true }));
 app.use(express.json());
 app.use(morgan(config.nodeEnv === "production" ? "combined" : "dev"));
@@ -46,7 +57,12 @@ app.use("/api/user", userRoutes);
 app.use("/api/anime", animeRoutes);
 app.use("/api/news", newsRoutes);
 app.use("/api/metadata", streamingMetadataRoutes);
+app.use("/api/metadata", metadataRoutes);
 app.use("/api/image", imageProxyRoutes);
+
+app.all("/cdn-cgi/*", (_req, res) => {
+  res.status(204).end();
+});
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });

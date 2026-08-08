@@ -98,14 +98,35 @@ const search = async (query, limit = 20) => {
     }
   }
 
-  const results = [...map.values()].slice(0, limit);
+  const bySource = new Map();
+  for (const item of map.values()) {
+    if (!bySource.has(item.source)) bySource.set(item.source, []);
+    bySource.get(item.source).push(item);
+  }
+
+  const activeSources = [...bySource.keys()];
+  const results = [];
+  let i = 0;
+  while (results.length < limit && activeSources.length) {
+    const idx = i % activeSources.length;
+    const arr = bySource.get(activeSources[idx]);
+    if (arr.length) {
+      results.push(arr.shift());
+      i++;
+    } else {
+      activeSources.splice(idx, 1);
+      i = 0;
+    }
+  }
+
   const out = { results, total: results.length };
   cache.set(cacheKey, out, 300);
   return out;
 };
 
 const resolvePrefixedSlug = async (slug) => {
-  const [provider, id] = String(slug || "").split(":");
+  const [provider, ...rest] = String(slug || "").split(":");
+  const id = rest.join(":");
   if (!provider || !id) return null;
   try {
     if (provider === "jikan") {
@@ -138,13 +159,67 @@ const resolvePrefixedSlug = async (slug) => {
         info: anilist,
       };
     }
+    if (provider === "anipub") {
+      const info = await anipubService.getSeriesDetails(id);
+      if (!info) return null;
+      const episodes = await anipubService.getEpisodes(id);
+      return {
+        source: "anipub",
+        title: info.title || "",
+        slug: id,
+        info,
+        episodes,
+      };
+    }
+    if (provider === "allanime") {
+      const info = await allAnimeService.getAnimeDetail(id);
+      if (!info) return null;
+      return {
+        source: "allanime",
+        title: info.title || "",
+        slug: id,
+        info,
+      };
+    }
+    if (provider === "animoye") {
+      const info = await animoyeService.getDetails(id);
+      if (!info) return null;
+      return {
+        source: "animoye",
+        title: info.title || "",
+        slug: id,
+        info,
+      };
+    }
+    if (provider === "watchanimeworld") {
+      const { details, slug: resolvedSlug } = await resolveWaw(id);
+      if (!details) return null;
+      return {
+        source: "watchanimeworld",
+        title: details.title || "",
+        slug: resolvedSlug,
+        info: details,
+      };
+    }
   } catch (err) {
     console.error("[StreamingMetadata] prefixed slug resolve failed:", err.message);
   }
   return null;
 };
 
-const isPrefixedSlug = (slug) => /^(jikan|kitsu|miruro):\d+$/.test(String(slug || ""));
+const isPrefixedSlug = (slug) => /^(jikan|kitsu|miruro|anipub|allanime|animoye|watchanimeworld):\S+/.test(String(slug || ""));
+
+const slugToTitle = (slug) => {
+  const raw = String(slug || "")
+    .replace(/^series\//, "")
+    .replace(/^movies\//, "")
+    .replace(/-dub$/i, "")
+    .replace(/[-_]+/g, " ")
+    .replace(/[^a-zA-Z0-9 ]/g, "")
+    .trim();
+  if (!raw) return "";
+  return raw.replace(/\b\w/g, (c) => c.toUpperCase());
+};
 
 const resolveWaw = async (slug) => {
   if (isPrefixedSlug(slug)) return { details: null, slug };
@@ -153,7 +228,7 @@ const resolveWaw = async (slug) => {
     let resolvedSlug = slug;
     if (!details) {
       const sr = await watchanimeworldService.search(slug);
-      const match = (sr || []).find((r) => norm(r.title) === norm(slug)) || (sr || [])[0];
+      const match = (sr || []).find((r) => norm(r.title) === norm(slug));
       if (match) {
         details = await watchanimeworldService.getDetails(match.slug);
         if (details) resolvedSlug = match.slug;
@@ -274,19 +349,36 @@ const getInfo = async (slug) => {
   if (cached) return cached;
 
   const { details: waw, slug: wawSlug } = await resolveWaw(slug);
-  let title = waw?.title || slug;
+  let title = waw?.title || slugToTitle(slug) || slug;
   let prefixed = null;
+  let directAnilist = null;
 
   if (!waw) {
     prefixed = await resolvePrefixedSlug(slug);
     if (prefixed) title = prefixed.title;
+
+    if (!prefixed && /^\d+$/.test(slug)) {
+      const anilistInfo = await anilistService.getMediaInfo(slug);
+      if (anilistInfo?.title && (anilistInfo.title.english || anilistInfo.title.romaji)) {
+        directAnilist = anilistInfo;
+        title = anilistInfo.title.english || anilistInfo.title.romaji || title;
+      } else {
+        const ap = await anipubService.getSeriesDetails(slug);
+        if (ap?.title) title = ap.title;
+      }
+    }
+
+    if (!prefixed && !/^\d+$/.test(slug)) {
+      const aa = await allAnimeService.getAnimeDetail(slug);
+      if (aa?.title) title = aa.title;
+    }
   }
 
   const [anipubR, animoyeR, allanimeR, anilistR, jikanR, kitsuR, miruroR] = await Promise.allSettled([
     findAnipub(title),
     findAnimoye(title),
     findAllAnime(title),
-    enrichWithAnilist(title),
+    directAnilist ? Promise.resolve(directAnilist) : enrichWithAnilist(title),
     prefixed?.source === "jikan" ? Promise.resolve(prefixed) : findJikan(title),
     prefixed?.source === "kitsu" ? Promise.resolve(prefixed) : findKitsu(title),
     prefixed?.source === "miruro" ? Promise.resolve(prefixed) : findMiruro(title),

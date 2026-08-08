@@ -152,4 +152,58 @@ const getSeasonal = async (season = null, year = null, page = 1, perPage = 20) =
   }
 };
 
-module.exports = { search, getAnimeById, getTopAnime, getSeasonal };
+const GENRE_IDS = {
+  action: 1,
+  adventure: 2,
+  comedy: 4,
+  drama: 8,
+  ecchi: 9,
+  fantasy: 10,
+  horror: 14,
+  "mahou-shoujo": 66,
+  mecha: 18,
+  music: 19,
+  mystery: 7,
+  psychological: 40,
+  romance: 22,
+  "sci-fi": 24,
+  "slice-of-life": 36,
+  sports: 30,
+  supernatural: 37,
+  thriller: 41,
+};
+
+const getByGenre = async (genre, page = 1, perPage = 20) => {
+  const cacheKey = `jikan_genre_${genre}_${page}_${perPage}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
+  const genreId = GENRE_IDS[(genre || "").toLowerCase()];
+  if (!genreId) return { results: [], pageInfo: {} };
+
+  try {
+    const { data } = await rateLimitedGet("/anime", {
+      genres: genreId,
+      order_by: "members",
+      sort: "desc",
+      page,
+      limit: perPage,
+    });
+    const results = (data?.data || []).map(transformAnime);
+    const pageInfo = {
+      total: data?.pagination?.items?.total || 0,
+      lastPage: data?.pagination?.last_visible_page || 1,
+      hasNextPage: data?.pagination?.has_next_page || false,
+      currentPage: data?.pagination?.current_page || page,
+      perPage,
+    };
+    const result = { results, pageInfo };
+    cache.set(cacheKey, result, 900);
+    return result;
+  } catch (err) {
+    console.error("[jikan] getByGenre failed:", err.message);
+    return { results: [], pageInfo: {} };
+  }
+};
+
+module.exports = { search, getAnimeById, getTopAnime, getSeasonal, getByGenre };

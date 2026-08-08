@@ -170,4 +170,40 @@ const getSeasonal = async (season = null, year = null, page = 1, perPage = 20) =
   }
 };
 
-module.exports = { search, getAnimeById, getTopRated, getSeasonal };
+const getByGenre = async (genre, page = 1, perPage = 20) => {
+  const cacheKey = `kitsu_genre_${genre}_${page}_${perPage}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const offset = (page - 1) * perPage;
+    const { data } = await client.get("/anime", {
+      params: {
+        "filter[genres]": genre,
+        sort: "-popularityRank",
+        "page[limit]": Math.min(perPage, 20),
+        "page[offset]": offset,
+      },
+    });
+    const results = (data?.data || []).map(transformAnime);
+    const totalCount = data?.meta?.count || 0;
+    const totalPages = Math.ceil(totalCount / perPage);
+    const result = {
+      results,
+      pageInfo: {
+        total: totalCount,
+        lastPage: totalPages,
+        hasNextPage: page < totalPages,
+        currentPage: page,
+        perPage,
+      },
+    };
+    cache.set(cacheKey, result, 900);
+    return result;
+  } catch (err) {
+    console.error("[kitsu] getByGenre failed:", err.message);
+    return { results: [], pageInfo: {} };
+  }
+};
+
+module.exports = { search, getAnimeById, getTopRated, getSeasonal, getByGenre };

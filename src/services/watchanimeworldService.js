@@ -7,6 +7,7 @@ const cache = new NodeCache({ stdTTL: 600 });
 
 const BASE_URLS = Array.from(
   new Set([
+    "https://animesky.top",
     config.watchanimeworldBaseUrl || "https://watchanimeworld.org",
     "https://watchanimeworld.top",
     "https://watchanimeworld.cc",
@@ -74,22 +75,60 @@ const requestPage = async (path, options = {}) => {
   throw new Error(`Failed to fetch WatchAnimeWorld page (${errors.join(" | ")})`);
 };
 
+const extractImageUrl = (imgEl) => {
+  if (!imgEl || imgEl.length === 0) return "";
+  const dataSrc = imgEl.attr("data-src") || "";
+  const src = imgEl.attr("src") || "";
+  const pick = (u) => {
+    if (!u || u.startsWith("data:") || u === "undefined") return "";
+    if (u.startsWith("//")) return `https:${u}`;
+    if (!u.startsWith("http")) return normalizeUrl(u, BASE_URL);
+    return u;
+  };
+  return pick(dataSrc) || pick(src);
+};
+
+const slugImageUrl = extractImageUrl;
+
+const slugFromUrl = (url) => {
+  try {
+    return new URL(url).pathname.replace(/^\/|\/$/g, "");
+  } catch {
+    return String(url).replace(/^https?:\/\/[^/]+\//, "").replace(/^\/|\/$/g, "");
+  }
+};
+
 const extractAnimeItems = ($) => {
   const results = [];
 
-  $("ul.post-lst li, .post-lst li, article.post, .item, .bsx").each((_, el) => {
+  const LINK_SELECTOR = "a.chart-poster, a.latest-ep-link, a.tr-movie-link, a.lnk-blk";
+  const TITLE_SELECTOR =
+    ".chart-title, .latest-ep-title, .tr-movie-title, h2.entry-title, h3.entry-title, .entry-title, .tt, .title";
+  const itemSelector = [
+    "article.tr-movie-card",
+    ".chart-item",
+    ".latest-ep-card",
+    "ul.post-lst li",
+    ".post-lst li",
+    "article.post",
+    ".item",
+    ".bsm",
+  ].join(", ");
+
+  $(itemSelector).each((_, el) => {
     const $el = $(el);
-    const linkEl = $el.find("a.lnk-blk").first().length ? $el.find("a.lnk-blk").first() : $el.find("a").first();
+    const linkEl = $el.find(LINK_SELECTOR).first().length
+      ? $el.find(LINK_SELECTOR).first()
+      : $el.find("a").first();
     const href = linkEl.attr("href") || "";
     const title =
-      $el.find("h2.entry-title, h3.entry-title, .entry-title, .tt, .title").first().text().trim() ||
+      $el.find(TITLE_SELECTOR).first().text().trim() ||
       linkEl.attr("title")?.trim() ||
       linkEl.text().trim();
-    const imgEl = $el.find("img").first();
-    const image = imgEl.attr("src") || imgEl.attr("data-src") || "";
+    const image = slugImageUrl($el.find("img").first());
 
-    if (title && href) {
-      const slug = href.replace(BASE_URL, "").replace(/^\/|\/$/g, "");
+    if (title && href && /^https?:/.test(href)) {
+      const slug = slugFromUrl(href);
       results.push({
         title,
         image,
@@ -139,7 +178,29 @@ const getHomepage = async (limit = 24) => {
   try {
     const { html } = await requestPage("/");
     const $ = cheerio.load(html);
-    const results = extractAnimeItems($).slice(0, limit);
+
+    const freshDrops = [];
+    $(".latest-ep-card").each((_, el) => {
+      const $el = $(el);
+      const linkEl = $el.find("a.latest-ep-link").first();
+      const href = linkEl.attr("href") || "";
+      const title = $el.find(".latest-ep-title").first().text().trim() || linkEl.text().trim();
+      const image = extractImageUrl($el.find("img").first());
+      if (title && href && /^https?:/.test(href)) {
+        const slug = slugFromUrl(href);
+        freshDrops.push({
+          title,
+          image,
+          slug,
+          url: href,
+          type: slug.includes("series") ? "series" : "movies",
+        });
+      }
+    });
+
+    const seen = new Set(freshDrops.map((r) => r.slug));
+    const rest = extractAnimeItems($).filter((r) => !seen.has(r.slug));
+    const results = [...freshDrops, ...rest].slice(0, limit);
     cache.set(cacheKey, results, 600);
     return results;
   } catch (err) {
@@ -158,9 +219,10 @@ const getDetails = async (slug) => {
     const { html } = await requestPage(url);
     const $ = cheerio.load(html);
 
-    const title = $("h1.entry-title, h1, .series-title").first().text().trim();
-    const image = $(".wp-post-image, .poster img, article img").first().attr("src") || "";
-    const description = $(".entry-content, .description, .synopsis").first().text().trim();
+    const title = $("h1.hero-title, h1.entry-title, h1, .series-title").first().text().trim();
+    const image = extractImageUrl($(".hero-poster img, .wp-post-image, .poster img, article img").first());
+    const description = $("meta[name='description']").attr("content") ||
+      $("#overview-text, .entry-content, .description, .synopsis").first().text().trim();
 
     let postId = "";
     const bodyClass = $("body").attr("class") || "";
@@ -170,6 +232,8 @@ const getDetails = async (slug) => {
     const seasons = [];
     const seasonLinks = $(
       ".choose-season .sel-temp a[data-post][data-season], " +
+      "a.season-btn[data-post][data-season], " +
+      "a.sel-temp[data-post][data-season], " +
       ".s-seasons a[data-season], " +
       ".season-list a[data-season], " +
       ".seasons a.season, " +
@@ -179,7 +243,10 @@ const getDetails = async (slug) => {
     seasonLinks.each((_, el) => {
       const $el = $(el);
       const val = $el.attr("data-season") || $el.data("season") || "";
-      const text = $el.text().trim();
+      const text =
+        $el.find(".season-label").first().text().trim() ||
+        $el.find(".ep-list-selector").first().text().trim() ||
+        $el.text().trim();
       if (val && text) {
         seasons.push({ id: val, title: text, seasonNumber: seasons.length + 1 });
       }
@@ -210,7 +277,7 @@ const getDetails = async (slug) => {
     }
 
     const episodes = [];
-    const episodeItems = $("#episode_by_temp > li, #aa-episodes li, .episodes li");
+    const episodeItems = $("#episode_by_temp > li, #aa-episodes li, .episodes li, .tr-episode-item");
     const targetItems = episodeItems.length
       ? episodeItems
       : $(
@@ -227,12 +294,12 @@ const getDetails = async (slug) => {
     let perSeasonIndex = 1;
     targetItems.each((_, el) => {
       const $el = $(el);
-      const epLink = $el.find("a.lnk-blk").length ? $el.find("a.lnk-blk").first() : $el.find("a").first();
+      const epLink = $el.find("a.lnk-blk, a.tr-episode-link").length ? $el.find("a.lnk-blk, a.tr-episode-link").first() : $el.find("a").first();
       const epHref = epLink.attr("href") || "";
       if (!epHref || epHref.includes("javascript:")) return;
 
-      const numEpi = $el.find(".num-epi, .ep-number, .e-num, .eptag").first().text().trim();
-      const entryTitle = $el.find(".entry-title, .ep-title, .tt").first().text().trim();
+      const numEpi = $el.find(".tr-episode-number, .num-epi, .ep-number, .e-num, .eptag").first().text().trim();
+      const entryTitle = $el.find(".tr-episode-title, .entry-title, .ep-title, .tt").first().text().trim();
       const epTitle = numEpi || entryTitle;
 
       let episodeNumber = perSeasonIndex;
@@ -246,7 +313,7 @@ const getDetails = async (slug) => {
         seasonNumber = parseInt(multiMatch[1], 10);
         episodeNumber = parseInt(multiMatch[2], 10);
       } else {
-        const epNumMatch = epTitle.match(/episode\s*(\d+)/i) || epTitle.match(/^(\d+)/);
+        const epNumMatch = epTitle.match(/episode\s*(\d+)/i) || epTitle.match(/EP\s*(\d+)/i) || epTitle.match(/^(\d+)$/);
         if (epNumMatch) {
           episodeNumber = parseInt(epNumMatch[1], 10);
         }
@@ -258,7 +325,7 @@ const getDetails = async (slug) => {
       if (isDuplicate) return;
 
       episodes.push({
-        id: epHref.replace(BASE_URL, "").replace(/^\//, ""),
+        id: slugFromUrl(epHref),
         title: epTitle,
         seasonNumber,
         episodeNumber,
@@ -293,43 +360,46 @@ const getEpisodesForSeason = async (postId, seasonNumber) => {
   if (cached) return cached;
 
   try {
-    const { html } = await requestPage("/wp-admin/admin-ajax.php", {
-      method: "post",
-      data: new URLSearchParams({
-        action: "action_select_season",
-        season: String(seasonNumber),
-        post: String(postId),
-      }).toString(),
+    const query = new URLSearchParams({
+      action: "action_select_season",
+      season: String(seasonNumber),
+      post: String(postId),
+    }).toString();
+    const { html } = await requestPage(`/wp-admin/admin-ajax.php?${query}`, {
+      method: "get",
       headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
         "X-Requested-With": "XMLHttpRequest",
+        Referer: `${BASE_URL}/`,
       },
     });
 
     const $ = cheerio.load(html);
     const episodes = [];
-    const episodeItems = $("li").length
-      ? $("li")
-      : $("#episode_by_temp > li, #aa-episodes li, .post-lst > li, .episodes li");
+    const episodeItems = $(".tr-episode-item").length
+      ? $(".tr-episode-item")
+      : $("#episode_by_temp > li, #aa-episodes li, .post-lst > li, .episodes li, li");
 
     let perSeasonIndex = 1;
     episodeItems.each((_, el) => {
       const $el = $(el);
-      const epLink = $el.find("a.lnk-blk").length ? $el.find("a.lnk-blk").first() : $el.find("a").first();
+      const epLink = $el.find("a.lnk-blk, a.tr-episode-link").length ? $el.find("a.lnk-blk, a.tr-episode-link").first() : $el.find("a").first();
       const epHref = epLink.attr("href") || "";
       if (!epHref || epHref.includes("javascript:")) return;
 
-      const numEpi = $el.find(".num-epi, .ep-number, .e-num, .eptag").first().text().trim();
-      const entryTitle = $el.find(".entry-title, .ep-title, .tt").first().text().trim();
+      const numEpi = $el.find(".tr-episode-number, .num-epi, .ep-number, .e-num, .eptag").first().text().trim();
+      const entryTitle = $el.find(".tr-episode-title, .entry-title, .ep-title, .tt").first().text().trim();
       const epTitle = numEpi || entryTitle;
 
       const seasonNum = parseInt(seasonNumber, 10) || 1;
       let episodeNumber = perSeasonIndex;
 
       const sxxExxMatch = epTitle.match(/[sS](\d+)\s*[eE](\d+)/);
-      const numOnlyMatch = epTitle.match(/^(\d+)/);
+      const multiMatch = numEpi.match(/(\d+)[xX](\d+)/) || entryTitle.match(/(\d+)[xX](\d+)/) || epTitle.match(/(\d+)[xX](\d+)/);
+      const numOnlyMatch = epTitle.match(/EP\s*(\d+)/i) || epTitle.match(/^(\d+)$/);
       if (sxxExxMatch) {
         episodeNumber = parseInt(sxxExxMatch[2], 10);
+      } else if (multiMatch) {
+        episodeNumber = parseInt(multiMatch[2], 10);
       } else if (numOnlyMatch) {
         episodeNumber = parseInt(numOnlyMatch[1], 10);
       }
@@ -338,7 +408,7 @@ const getEpisodesForSeason = async (postId, seasonNumber) => {
       if (isDuplicate) return;
 
       episodes.push({
-        id: epHref.replace(BASE_URL, "").replace(/^\//, ""),
+        id: slugFromUrl(epHref),
         title: epTitle,
         seasonNumber: seasonNum,
         episodeNumber,
@@ -404,8 +474,8 @@ const extractEmbedFromEpisode = async (episodeUrl) => {
   }
 };
 
-const pickBestSearchResult = (results, query) => {
-  if (results.length === 0) return null;
+const rankSearchResults = (results, query) => {
+  if (results.length === 0) return [];
   const q = query.toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
 
   const scored = results.map((r) => {
@@ -422,11 +492,162 @@ const pickBestSearchResult = (results, query) => {
       score = (matchedWords.length / qWords.length) * 50;
     }
     if (r.type === "series") score += 10;
+    if (t === q && r.title === query) score += 5;
     return { ...r, score };
   });
 
   scored.sort((a, b) => b.score - a.score);
-  return scored[0];
+  return scored;
+};
+
+const pickBestSearchResult = (results, query) => rankSearchResults(results, query)[0] || null;
+
+const matchEpisodeInList = (seasonEps, episode, effectiveSeason) => {
+  const exact = seasonEps.find((e) => e.episodeNumber === episode && e.seasonNumber === effectiveSeason);
+  if (exact) return { epEntry: exact, viaOffset: false };
+  const nums = seasonEps.map((e) => e.episodeNumber).filter((n) => !isNaN(n));
+  if (nums.length) {
+    const minEp = Math.min(...nums);
+    const offsetTarget = minEp + Number(episode) - 1;
+    const viaOffset = seasonEps.find((e) => e.episodeNumber === offsetTarget && e.seasonNumber === effectiveSeason);
+    if (viaOffset) return { epEntry: viaOffset, viaOffset: true, minEp, offsetTarget };
+  }
+  return { epEntry: null, viaOffset: false };
+};
+
+const findEpisode = async (details, effectiveSeason, episode) => {
+  let epEntry = null;
+
+  if (details.seasons && details.seasons.length > 0 && details.id) {
+    const targetSeason = details.seasons.find((s) => s.seasonNumber === effectiveSeason || String(s.id) === String(effectiveSeason));
+    console.log(`[WatchAnimeWorld] Looking for season=${effectiveSeason}, found targetSeason:`, targetSeason ? `${targetSeason.title} (id=${targetSeason.id})` : "NOT FOUND");
+    if (targetSeason) {
+      const seasonEps = await getEpisodesForSeason(details.id, targetSeason.id || targetSeason.seasonNumber);
+      console.log(`[WatchAnimeWorld] Season ${effectiveSeason} has ${seasonEps.length} episodes via AJAX`);
+      const match = matchEpisodeInList(seasonEps, episode, effectiveSeason);
+      epEntry = match.epEntry;
+      if (epEntry) {
+        console.log(`[WatchAnimeWorld] Matched${match.viaOffset ? ` via season offset (local E${episode} = global E${match.offsetTarget})` : ""}: S${epEntry.seasonNumber}E${epEntry.episodeNumber} → ${epEntry.url}`);
+      }
+    }
+  }
+
+  if (!epEntry) {
+    let allEpisodes = [...(details.episodes || [])];
+    epEntry = allEpisodes.find((e) => e.episodeNumber === episode && e.seasonNumber === effectiveSeason);
+    if (epEntry) {
+      console.log(`[WatchAnimeWorld] Found in default episodes: S${epEntry.seasonNumber}E${epEntry.episodeNumber} → ${epEntry.url}`);
+    }
+
+    if (!epEntry && details.seasons && details.seasons.length > 0 && details.id) {
+      for (const s of details.seasons) {
+        if (s.seasonNumber === effectiveSeason || String(s.id) === String(effectiveSeason)) {
+          const seasonEps = await getEpisodesForSeason(details.id, s.id || s.seasonNumber);
+          const match = matchEpisodeInList(seasonEps, episode, effectiveSeason);
+          if (match.epEntry) {
+            epEntry = match.epEntry;
+            console.log(`[WatchAnimeWorld] Found via fallback season scan${match.viaOffset ? ` (local E${episode} = global E${match.offsetTarget})` : ""}: S${epEntry.seasonNumber}E${epEntry.episodeNumber} → ${epEntry.url}`);
+            break;
+          }
+        }
+      }
+      if (!epEntry) {
+        for (const s of details.seasons) {
+          const seasonEps = await getEpisodesForSeason(details.id, s.id || s.seasonNumber);
+          const match = matchEpisodeInList(seasonEps, episode, effectiveSeason);
+          if (match.epEntry) {
+            epEntry = match.epEntry;
+            console.log(`[WatchAnimeWorld] Found via full season scan${match.viaOffset ? ` (local E${episode} = global E${match.offsetTarget})` : ""}: S${epEntry.seasonNumber}E${epEntry.episodeNumber} → ${epEntry.url}`);
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  return epEntry;
+};
+
+const resolveCandidate = async (match, effectiveSeason, episode) => {
+  const isMovie = match.slug.startsWith("movies/");
+  if (isMovie) {
+    if (episode > 1) return null;
+    console.log(`[WatchAnimeWorld] Detected movie: ${match.slug}`);
+    const movieUrl = `${BASE_URL}/${match.slug}`;
+    const embedUrl = await extractEmbedFromEpisode(movieUrl);
+    if (!embedUrl) {
+      console.log(`[WatchAnimeWorld] Could not extract embed URL for movie ${match.slug}`);
+      return null;
+    }
+    console.log(`[WatchAnimeWorld] Movie success: embedUrl=${embedUrl}`);
+    return {
+      success: true,
+      source: "watchanimeworld",
+      embedUrl,
+      title: match.title,
+      image: match.image,
+      slug: match.slug,
+      episode: 1,
+      season: 1,
+      episodeId: match.slug,
+    };
+  }
+
+  const details = await getDetails(match.slug);
+  if (!details) {
+    console.log(`[WatchAnimeWorld] Could not load details for "${match.title}" (${match.slug})`);
+    return null;
+  }
+
+  console.log(`[WatchAnimeWorld] Details loaded: postId=${details.id} seasons=${details.seasons.length} defaultEps=${details.episodes.length}`);
+
+  const epEntry = await findEpisode(details, effectiveSeason, episode);
+  if (!epEntry) {
+    console.log(`[WatchAnimeWorld] Episode S${effectiveSeason}E${episode} NOT FOUND on "${match.title}" (${match.slug})`);
+    return null;
+  }
+
+  const embedUrl = await extractEmbedFromEpisode(epEntry.url);
+  if (!embedUrl) {
+    console.log(`[WatchAnimeWorld] Could not extract embed URL from ${epEntry.url}`);
+    return null;
+  }
+
+  console.log(`[WatchAnimeWorld] Success: embedUrl=${embedUrl}`);
+
+  let seasonsWithEpisodes = null;
+  if (details.seasons && details.seasons.length > 0) {
+    try {
+      const seasonCounts = await Promise.all(
+        details.seasons.map(async (s) => {
+          const eps = await getEpisodesForSeason(details.id, s.id || s.seasonNumber);
+          const nums = eps.map((e) => e.episodeNumber).filter((n) => !isNaN(n));
+          const minEp = nums.length ? Math.min(...nums) : 1;
+          return {
+            ...s,
+            episodeCount: eps.length || null,
+            episodes: nums.map((n) => n - minEp + 1),
+          };
+        })
+      );
+      seasonsWithEpisodes = seasonCounts;
+    } catch (_) {
+      seasonsWithEpisodes = details.seasons;
+    }
+  }
+
+  return {
+    success: true,
+    source: "watchanimeworld",
+    embedUrl,
+    title: details.title,
+    image: details.image,
+    slug: match.slug,
+    episode,
+    season: epEntry.seasonNumber,
+    seasons: seasonsWithEpisodes || details.seasons,
+    episodeId: epEntry.id,
+  };
 };
 
 const getStream = async (title, episode, season) => {
@@ -444,120 +665,24 @@ const getStream = async (title, episode, season) => {
       return { success: false, source: "watchanimeworld", reason: "WatchAnimeWorld is currently unavailable or has no matching results" };
     }
 
-    const match = pickBestSearchResult(searchResults, title);
-    console.log(`[WatchAnimeWorld] Search matched: "${match.title}" slug="${match.slug}"`);
-    const details = await getDetails(match.slug);
-    if (!details) {
-      return { success: false, source: "watchanimeworld", reason: "Could not load anime details" };
-    }
+    const ranked = rankSearchResults(searchResults, title);
 
-    console.log(`[WatchAnimeWorld] Details loaded: postId=${details.id} seasons=${details.seasons.length} defaultEps=${details.episodes.length}`);
-
-    const isMovie = match.slug.startsWith("movies/");
-    if (isMovie) {
-      console.log(`[WatchAnimeWorld] Detected movie: ${match.slug}`);
-      const movieUrl = `${BASE_URL}/${match.slug}`;
-      const embedUrl = await extractEmbedFromEpisode(movieUrl);
-      if (!embedUrl) {
-        return { success: false, source: "watchanimeworld", reason: "Could not extract embed URL for this movie" };
+    const failures = [];
+    for (const match of ranked) {
+      console.log(`[WatchAnimeWorld] Trying candidate: "${match.title}" slug="${match.slug}" (score=${match.score})`);
+      const result = await resolveCandidate(match, effectiveSeason, episode);
+      if (result?.success) {
+        cache.set(cacheKey, result, 600);
+        return result;
       }
-      console.log(`[WatchAnimeWorld] Movie success: embedUrl=${embedUrl}`);
-      const result = {
-        success: true,
-        source: "watchanimeworld",
-        embedUrl,
-        title: details.title,
-        image: details.image,
-        slug: match.slug,
-        episode: 1,
-        season: 1,
-        seasons: details.seasons,
-        episodeId: match.slug,
-      };
-      cache.set(cacheKey, result, 600);
-      return result;
+      failures.push({ title: match.title, slug: match.slug, reason: result?.reason || "No playable embed found" });
     }
 
-    let epEntry = null;
-
-    if (details.seasons && details.seasons.length > 0 && details.id) {
-      const targetSeason = details.seasons.find((s) => s.seasonNumber === effectiveSeason || String(s.id) === String(effectiveSeason));
-      console.log(`[WatchAnimeWorld] Looking for season=${effectiveSeason}, found targetSeason:`, targetSeason ? `${targetSeason.title} (id=${targetSeason.id})` : "NOT FOUND");
-      if (targetSeason) {
-        const seasonEps = await getEpisodesForSeason(details.id, targetSeason.id || targetSeason.seasonNumber);
-        console.log(`[WatchAnimeWorld] Season ${effectiveSeason} has ${seasonEps.length} episodes via AJAX`);
-        epEntry = seasonEps.find((e) => e.episodeNumber === episode && e.seasonNumber === effectiveSeason);
-        if (epEntry) {
-          console.log(`[WatchAnimeWorld] Matched: S${epEntry.seasonNumber}E${epEntry.episodeNumber} → ${epEntry.url}`);
-        } else {
-          epEntry = seasonEps.find((e) => e.episodeNumber === episode);
-          if (epEntry) {
-            console.log(`[WatchAnimeWorld] Fallback match (any season): S${epEntry.seasonNumber}E${epEntry.episodeNumber} → ${epEntry.url}`);
-          }
-        }
-      }
-    }
-
-    if (!epEntry) {
-      let allEpisodes = [...(details.episodes || [])];
-      epEntry = allEpisodes.find((e) => e.episodeNumber === episode && e.seasonNumber === effectiveSeason);
-      if (epEntry) {
-        console.log(`[WatchAnimeWorld] Found in default episodes: S${epEntry.seasonNumber}E${epEntry.episodeNumber} → ${epEntry.url}`);
-      }
-
-      if (!epEntry && details.seasons && details.seasons.length > 0 && details.id) {
-        for (const s of details.seasons) {
-          if (s.seasonNumber === effectiveSeason || String(s.id) === String(effectiveSeason)) {
-            const seasonEps = await getEpisodesForSeason(details.id, s.id || s.seasonNumber);
-            allEpisodes = allEpisodes.concat(seasonEps);
-            epEntry = allEpisodes.find((e) => e.episodeNumber === episode && e.seasonNumber === effectiveSeason);
-            if (epEntry) {
-              console.log(`[WatchAnimeWorld] Found via fallback season scan: S${epEntry.seasonNumber}E${epEntry.episodeNumber} → ${epEntry.url}`);
-              break;
-            }
-          }
-        }
-        if (!epEntry) {
-          for (const s of details.seasons) {
-            const seasonEps = await getEpisodesForSeason(details.id, s.id || s.seasonNumber);
-            allEpisodes = allEpisodes.concat(seasonEps);
-            epEntry = allEpisodes.find((e) => e.episodeNumber === episode && e.seasonNumber === effectiveSeason);
-            if (epEntry) {
-              console.log(`[WatchAnimeWorld] Found via full season scan: S${epEntry.seasonNumber}E${epEntry.episodeNumber} → ${epEntry.url}`);
-              break;
-            }
-          }
-        }
-      }
-    }
-
-    if (!epEntry) {
-      console.log(`[WatchAnimeWorld] Episode S${effectiveSeason}E${episode} NOT FOUND`);
-      return { success: false, source: "watchanimeworld", reason: `Episode S${effectiveSeason}E${episode} not found` };
-    }
-
-    const embedUrl = await extractEmbedFromEpisode(epEntry.url);
-    if (!embedUrl) {
-      return { success: false, source: "watchanimeworld", reason: "Could not extract embed URL" };
-    }
-
-    console.log(`[WatchAnimeWorld] Success: embedUrl=${embedUrl}`);
-
-    const result = {
-      success: true,
-      source: "watchanimeworld",
-      embedUrl,
-      title: details.title,
-      image: details.image,
-      slug: match.slug,
-      episode,
-      season: epEntry.seasonNumber,
-      seasons: details.seasons,
-      episodeId: epEntry.id,
-    };
-
-    cache.set(cacheKey, result, 600);
-    return result;
+    const reason = `Episode S${effectiveSeason}E${episode} not found`;
+    console.log(`[WatchAnimeWorld] Episode S${effectiveSeason}E${episode} NOT FOUND`);
+    const failed = { success: false, source: "watchanimeworld", reason, details: failures };
+    cache.set(cacheKey, failed, 120);
+    return failed;
   } catch (err) {
     console.error("[WatchAnimeWorld] getStream failed:", err.message);
     return { success: false, source: "watchanimeworld", reason: err.message };
@@ -573,4 +698,4 @@ const isAvailable = async () => {
   }
 };
 
-module.exports = { search, getHomepage, getDetails, getEpisodesForSeason, extractEmbedFromEpisode, getStream, isAvailable };
+module.exports = { search, getHomepage, getDetails, getEpisodesForSeason, extractEmbedFromEpisode, rankSearchResults, pickBestSearchResult, getStream, isAvailable };

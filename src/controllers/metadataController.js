@@ -2,7 +2,6 @@ const jikanService = require("../services/jikanService");
 const kitsuService = require("../services/kitsuService");
 const miruroService = require("../services/miruroService");
 const anilistService = require("../services/anilistService");
-
 const MAX_PER_PAGE = 50;
 
 function clampPerPage(val, defaultVal) {
@@ -51,9 +50,37 @@ const seasonalServices = {
   miruro: "getSeasonal",
 };
 
+const kitsuFallbackFor = {
+  getTrending: ["getTopRated"],
+  getPopular: ["getTopRated"],
+  getSeasonal: ["getSeasonal"],
+  search: ["search"],
+  getMediaInfo: ["getAnimeById"],
+};
+
+function isEmptyResult(result) {
+  if (result === null || result === undefined) return true;
+  if (Array.isArray(result)) return result.length === 0;
+  if (Array.isArray(result.results)) return result.results.length === 0;
+  return false;
+}
+
 async function callService(service, methodName, fallback, args) {
   if (!service || typeof service[methodName] !== "function") return fallback;
-  return service[methodName](...args);
+
+  let result = await service[methodName](...args);
+  if (isEmptyResult(result) && service !== kitsuService) {
+    const fallbackMethods = kitsuFallbackFor[methodName] || [];
+    for (const fallbackMethod of fallbackMethods) {
+      if (typeof kitsuService[fallbackMethod] !== "function") continue;
+      const fallbackResult = await kitsuService[fallbackMethod](...args);
+      if (!isEmptyResult(fallbackResult)) {
+        result = fallbackResult;
+        break;
+      }
+    }
+  }
+  return result;
 }
 
 exports.search = async (req, res, next) => {
